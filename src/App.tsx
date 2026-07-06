@@ -1,27 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Section } from "./components/Section";
 import { Settings } from "./components/Settings";
+import { CHAIN_LABEL, EXPLORER_CONTRACT, EXPLORER_TX, MAX_CALLS_PER_TX } from "./config";
 import {
-  CHAIN_LABEL,
-  EXPLORER_CONTRACT,
-  EXPLORER_TX,
-  MAX_CALLS_PER_TX,
-} from "./config";
-import { makeProvider } from "./lib/provider";
-import {
-  connectWallet,
-  disconnectWallet,
-  isOnTargetChain,
-  type WalletConnection,
-} from "./lib/wallet";
-import {
+  type HeldCollection,
   isDeployed,
   lookupErc20,
   lookupNft,
   scanErc20,
   scanNfts,
-  type HeldCollection,
 } from "./lib/discovery";
-import { MAINNET_TOKENS } from "./lib/tokens";
 import {
   addressesEqual,
   formatUnits,
@@ -29,9 +17,8 @@ import {
   parseUnits,
   shortenAddress,
 } from "./lib/format";
-import type { Asset, Erc20Asset, NftAsset } from "./lib/types";
-import { fetchUsdPrices, priceKey } from "./lib/prices";
 import {
+  type MigrationItem,
   buildCalls,
   buildOwnershipChallenge,
   chunk,
@@ -40,8 +27,17 @@ import {
   executeCalls,
   randomNonce,
   verifyOwnership,
-  type MigrationItem,
 } from "./lib/migrate";
+import { fetchUsdPrices, priceKey } from "./lib/prices";
+import { makeProvider } from "./lib/provider";
+import { MAINNET_TOKENS } from "./lib/tokens";
+import type { Asset, Erc20Asset, NftAsset } from "./lib/types";
+import {
+  type WalletConnection,
+  connectWallet,
+  disconnectWallet,
+  isOnTargetChain,
+} from "./lib/wallet";
 
 const STRK = MAINNET_TOKENS.find((t) => t.symbol === "STRK")!;
 
@@ -80,13 +76,7 @@ interface TxState {
   note?: string;
 }
 
-type MigrateStatus =
-  | "idle"
-  | "estimating"
-  | "estimated"
-  | "executing"
-  | "done"
-  | "error";
+type MigrateStatus = "idle" | "estimating" | "estimated" | "executing" | "done" | "error";
 
 const STEPS = ["Connect", "Recipient", "Assets", "Review"] as const;
 
@@ -118,10 +108,7 @@ export default function App() {
 
   // Recipient
   const [recipientInput, setRecipientInput] = useState("");
-  const recipient = useMemo(
-    () => normalizeAddress(recipientInput),
-    [recipientInput],
-  );
+  const recipient = useMemo(() => normalizeAddress(recipientInput), [recipientInput]);
 
   // As soon as a valid recipient is entered, check on-chain whether its account
   // is deployed (debounced). If not, the activation panel appears proactively.
@@ -170,6 +157,23 @@ export default function App() {
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [prices, setPrices] = useState<Map<string, number>>(new Map());
 
+  const priceOf = useCallback(
+    (a: Asset): number | undefined => {
+      if (a.kind !== "erc20") return undefined;
+      return prices.get(priceKey(a.address));
+    },
+    [prices]
+  );
+
+  const tokenValueUsd = useCallback(
+    (a: Erc20Asset, amountRaw: bigint): number | undefined => {
+      const p = prices.get(priceKey(a.address));
+      if (p === undefined) return undefined;
+      return (Number(amountRaw) / 10 ** a.decimals) * p;
+    },
+    [prices]
+  );
+
   // Manual add
   const [manualToken, setManualToken] = useState("");
   const [manualNftAddr, setManualNftAddr] = useState("");
@@ -210,31 +214,18 @@ export default function App() {
     return items;
   }, [allAssets, selected, amounts]);
 
-  function priceOf(a: Asset): number | undefined {
-    if (a.kind !== "erc20") return undefined;
-    return prices.get(priceKey(a.address));
-  }
-  function valueOf(a: Erc20Asset, amountRaw: bigint): number | undefined {
-    const p = prices.get(priceKey(a.address));
-    if (p === undefined) return undefined;
-    return (Number(amountRaw) / 10 ** a.decimals) * p;
-  }
-
   const detectedValue = useMemo(
-    () =>
-      erc20s.reduce((sum, a) => sum + (valueOf(a, a.balance) ?? 0), 0),
-    [erc20s, prices],
+    () => erc20s.reduce((sum, a) => sum + (tokenValueUsd(a, a.balance) ?? 0), 0),
+    [erc20s, tokenValueUsd]
   );
   const migratingValue = useMemo(
     () =>
       selectedItems.reduce(
         (sum, it) =>
-          it.asset.kind === "erc20"
-            ? sum + (valueOf(it.asset, it.amount) ?? 0)
-            : sum,
-        0,
+          it.asset.kind === "erc20" ? sum + (tokenValueUsd(it.asset, it.amount) ?? 0) : sum,
+        0
       ),
-    [selectedItems, prices],
+    [selectedItems, tokenValueUsd]
   );
 
   async function refreshPrices(tokens: Erc20Asset[]) {
@@ -242,7 +233,7 @@ export default function App() {
     try {
       const m = await fetchUsdPrices(
         makeProvider(),
-        tokens.map((t) => ({ address: t.address, decimals: t.decimals })),
+        tokens.map((t) => ({ address: t.address, decimals: t.decimals }))
       );
       setPrices((prev) => {
         const next = new Map(prev);
@@ -424,7 +415,7 @@ export default function App() {
               status: "error",
               error:
                 "Transaction confirmed but the account still reads as undeployed. Check your wallet — it may not auto-deploy on a dapp transaction; deploy it from the wallet's own UI instead.",
-            },
+            }
       );
     } catch (e: any) {
       setDeployTx({
@@ -497,12 +488,7 @@ export default function App() {
     setManualBusy(true);
     setManualError(undefined);
     try {
-      const asset = await lookupNft(
-        makeProvider(),
-        manualNftAddr,
-        manualNftId,
-        sender.address,
-      );
+      const asset = await lookupNft(makeProvider(), manualNftAddr, manualNftId, sender.address);
       if (nfts.some((n) => n.id === asset.id)) {
         setManualError("NFT already in the list.");
         return;
@@ -543,7 +529,7 @@ export default function App() {
       setMStatus("estimated");
     } catch (e: any) {
       setMError(
-        `Fee estimate failed: ${e?.message ?? e}. If you are sending most of your ETH/STRK, keep more of the gas token and try again.`,
+        `Fee estimate failed: ${e?.message ?? e}. If you are sending most of your ETH/STRK, keep more of the gas token and try again.`
       );
       setMStatus("error");
     }
@@ -565,24 +551,19 @@ export default function App() {
           {
             hash: transactionHash,
             status: "submitted",
-            note:
-              batches.length > 1 ? `Batch ${i + 1} of ${batches.length}` : undefined,
+            note: batches.length > 1 ? `Batch ${i + 1} of ${batches.length}` : undefined,
           },
         ]);
         try {
           await provider.waitForTransaction(transactionHash);
           setTxs((prev) =>
-            prev.map((t) =>
-              t.hash === transactionHash ? { ...t, status: "confirmed" } : t,
-            ),
+            prev.map((t) => (t.hash === transactionHash ? { ...t, status: "confirmed" } : t))
           );
         } catch (waitErr: any) {
           setTxs((prev) =>
             prev.map((t) =>
-              t.hash === transactionHash
-                ? { ...t, status: "reverted", note: waitErr?.message }
-                : t,
-            ),
+              t.hash === transactionHash ? { ...t, status: "reverted", note: waitErr?.message } : t
+            )
           );
         }
       }
@@ -629,8 +610,8 @@ export default function App() {
 
       {!chainOk && (
         <div className="banner warn">
-          Connected wallet is not on {CHAIN_LABEL}. Switch the network in your
-          wallet — this app only operates on mainnet.
+          Connected wallet is not on {CHAIN_LABEL}. Switch the network in your wallet — this app
+          only operates on mainnet.
         </div>
       )}
 
@@ -639,7 +620,7 @@ export default function App() {
           <button
             key={s}
             className={`stepper-item ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}
-            disabled={i > step && !(i === 1 && sender) }
+            disabled={i > step && !(i === 1 && sender)}
             onClick={() => i <= step && setStep(i)}
           >
             <span className="step-num">{i + 1}</span>
@@ -656,18 +637,13 @@ export default function App() {
           >
             {sender ? (
               <div className="ok-row">
-                <span className="dot ok" /> Connected:{" "}
-                <code>{sender.address}</code>
+                <span className="dot ok" /> Connected: <code>{sender.address}</code>
                 <button className="btn primary" onClick={() => setStep(1)}>
                   Continue →
                 </button>
               </div>
             ) : (
-              <button
-                className="btn primary big"
-                onClick={handleConnect}
-                disabled={connecting}
-              >
+              <button className="btn primary big" onClick={handleConnect} disabled={connecting}>
                 {connecting ? "Connecting…" : "Connect wallet"}
               </button>
             )}
@@ -697,9 +673,7 @@ export default function App() {
               {recipientInput && !recipient && (
                 <small className="error">Not a valid Starknet address.</small>
               )}
-              {recipient && (
-                <small className="muted">Parsed: {recipient}</small>
-              )}
+              {recipient && <small className="muted">Parsed: {recipient}</small>}
               {recipient && recipientStatus === "checking" && (
                 <small className="muted">Checking deployment status…</small>
               )}
@@ -708,8 +682,7 @@ export default function App() {
               )}
               {recipient && recipientStatus === "undeployed" && (
                 <small className="warn-text">
-                  ⚠ This account isn’t deployed on-chain yet — activation options
-                  are below.
+                  ⚠ This account isn’t deployed on-chain yet — activation options are below.
                 </small>
               )}
               {recipient && recipientStatus === "error" && (
@@ -718,27 +691,20 @@ export default function App() {
                 </small>
               )}
               {recipient && sender && addressesEqual(recipient, sender.address) && (
-                <small className="error">
-                  Recipient is the same as the sending wallet.
-                </small>
+                <small className="error">Recipient is the same as the sending wallet.</small>
               )}
             </label>
 
             <div className="proof-box">
               <div className="proof-head">
                 <strong>Optional: prove ownership</strong>
-                {proof.status === "verified" && (
-                  <span className="tag ok">✓ Verified on-chain</span>
-                )}
-                {proof.status === "failed" && (
-                  <span className="tag bad">✗ Not verified</span>
-                )}
+                {proof.status === "verified" && <span className="tag ok">✓ Verified on-chain</span>}
+                {proof.status === "failed" && <span className="tag bad">✗ Not verified</span>}
               </div>
               <p className="muted">
-                Connect the receiving wallet and sign a gas-free message. The
-                signature is checked against the address on-chain, confirming you
-                control it. Skip this if the destination is a cold/hardware
-                wallet you can&apos;t connect here.
+                Connect the receiving wallet and sign a gas-free message. The signature is checked
+                against the address on-chain, confirming you control it. Skip this if the
+                destination is a cold/hardware wallet you can&apos;t connect here.
               </p>
               <button
                 className="btn ghost"
@@ -749,19 +715,16 @@ export default function App() {
                   ? "Waiting for signature…"
                   : "Connect receiver & sign"}
               </button>
-              {proof.status === "failed" && (
-                <p className="error">{proof.message}</p>
-              )}
+              {proof.status === "failed" && <p className="error">{proof.message}</p>}
 
               {receiverUndeployed && (
                 <div className="deploy-box">
                   <strong>Activate the receiving account</strong>
                   <p className="muted">
-                    You can <em>skip this and migrate anyway</em> — transfers to an
-                    undeployed address succeed. Or activate it now: fund the gas
-                    from the <strong>sending</strong> wallet, then deploy from the{" "}
-                    <strong>receiving</strong> wallet (only it can sign its own
-                    deployment).
+                    You can <em>skip this and migrate anyway</em> — transfers to an undeployed
+                    address succeed. Or activate it now: fund the gas from the{" "}
+                    <strong>sending</strong> wallet, then deploy from the <strong>receiving</strong>{" "}
+                    wallet (only it can sign its own deployment).
                   </p>
 
                   <div className="deploy-step">
@@ -787,24 +750,15 @@ export default function App() {
                             : "Fund gas from sending wallet"}
                         </button>
                       </div>
-                      {(deployFund.status === "submitted" ||
-                        deployFund.status === "funded") && (
+                      {(deployFund.status === "submitted" || deployFund.status === "funded") && (
                         <p className="muted small">
-                          {deployFund.status === "funded"
-                            ? "✓ Gas sent. "
-                            : "Sent, confirming… "}
-                          <a
-                            href={EXPLORER_TX(deployFund.hash)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
+                          {deployFund.status === "funded" ? "✓ Gas sent. " : "Sent, confirming… "}
+                          <a href={EXPLORER_TX(deployFund.hash)} target="_blank" rel="noreferrer">
                             {shortenAddress(deployFund.hash, 10, 8)}
                           </a>
                         </p>
                       )}
-                      {deployFund.status === "error" && (
-                        <p className="error">{deployFund.error}</p>
-                      )}
+                      {deployFund.status === "error" && <p className="error">{deployFund.error}</p>}
                     </div>
                   </div>
 
@@ -814,10 +768,7 @@ export default function App() {
                       <button
                         className="btn ghost"
                         onClick={handleDeployReceiver}
-                        disabled={
-                          deployTx.status === "deploying" ||
-                          deployTx.status === "deployed"
-                        }
+                        disabled={deployTx.status === "deploying" || deployTx.status === "deployed"}
                       >
                         {deployTx.status === "deploying"
                           ? "Deploying…"
@@ -830,11 +781,7 @@ export default function App() {
                       {deployTx.status === "submitted" && (
                         <p className="muted small">
                           Deploying, confirming…{" "}
-                          <a
-                            href={EXPLORER_TX(deployTx.hash)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
+                          <a href={EXPLORER_TX(deployTx.hash)} target="_blank" rel="noreferrer">
                             {shortenAddress(deployTx.hash, 10, 8)}
                           </a>
                         </p>
@@ -845,11 +792,7 @@ export default function App() {
                           {deployTx.hash ? (
                             <>
                               {" "}
-                              <a
-                                href={EXPLORER_TX(deployTx.hash)}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
+                              <a href={EXPLORER_TX(deployTx.hash)} target="_blank" rel="noreferrer">
                                 {shortenAddress(deployTx.hash, 10, 8)}
                               </a>
                             </>
@@ -857,9 +800,7 @@ export default function App() {
                           — click “Connect receiver &amp; sign” above to verify.
                         </p>
                       )}
-                      {deployTx.status === "error" && (
-                        <p className="error">{deployTx.error}</p>
-                      )}
+                      {deployTx.status === "error" && <p className="error">{deployTx.error}</p>}
                     </div>
                   </div>
                 </div>
@@ -872,10 +813,7 @@ export default function App() {
               </button>
               <button
                 className="btn primary"
-                disabled={
-                  !recipient ||
-                  (sender ? addressesEqual(recipient, sender.address) : true)
-                }
+                disabled={!recipient || (sender ? addressesEqual(recipient, sender.address) : true)}
                 onClick={() => {
                   setStep(2);
                   if (allAssets.length === 0) handleScan();
@@ -916,16 +854,13 @@ export default function App() {
                         onChange={() => toggle(a.id)}
                       />
                       <div className="asset-main">
-                        <strong>{a.symbol}</strong>{" "}
-                        <span className="muted">{a.name}</span>
+                        <strong>{a.symbol}</strong> <span className="muted">{a.name}</span>
                         {a.isGasToken && <span className="tag">gas token</span>}
                         <div className="muted small">
                           Balance: {formatUnits(a.balance, a.decimals)}
-                          {priceOf(a) !== undefined && (
-                            <> · {formatUsd(priceOf(a)!)}/ea</>
-                          )}
-                          {valueOf(a, a.balance) !== undefined && (
-                            <> · ≈ {formatUsd(valueOf(a, a.balance)!)}</>
+                          {priceOf(a) !== undefined && <> · {formatUsd(priceOf(a)!)}/ea</>}
+                          {tokenValueUsd(a, a.balance) !== undefined && (
+                            <> · ≈ {formatUsd(tokenValueUsd(a, a.balance)!)}</>
                           )}
                         </div>
                       </div>
@@ -937,9 +872,7 @@ export default function App() {
                         />
                         <button
                           className="link"
-                          onClick={() =>
-                            setAmt(a.id, formatUnits(a.balance, a.decimals))
-                          }
+                          onClick={() => setAmt(a.id, formatUnits(a.balance, a.decimals))}
                         >
                           max
                         </button>
@@ -948,8 +881,8 @@ export default function App() {
                   ))}
                 </div>
                 <p className="muted small">
-                  For ETH and STRK the default keeps a small buffer so you can
-                  still pay the transaction fee.
+                  For ETH and STRK the default keeps a small buffer so you can still pay the
+                  transaction fee.
                 </p>
               </>
             )}
@@ -975,11 +908,7 @@ export default function App() {
                         <div className="muted small">
                           #{a.tokenId.toString()} ·{" "}
                           {a.kind === "erc1155" ? `x${a.balance}` : "ERC-721"} ·{" "}
-                          <a
-                            href={EXPLORER_CONTRACT(a.address)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
+                          <a href={EXPLORER_CONTRACT(a.address)} target="_blank" rel="noreferrer">
                             {shortenAddress(a.address)}
                           </a>
                         </div>
@@ -1010,11 +939,7 @@ export default function App() {
                         <div className="muted small">
                           Holds {c.balance}
                           {c.truncated ? "+" : ""} · not enumerable on-chain ·{" "}
-                          <a
-                            href={EXPLORER_CONTRACT(c.address)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
+                          <a href={EXPLORER_CONTRACT(c.address)} target="_blank" rel="noreferrer">
                             {shortenAddress(c.address)}
                           </a>
                         </div>
@@ -1039,9 +964,7 @@ export default function App() {
             <details
               className="manual"
               open={manualOpen}
-              onToggle={(e) =>
-                setManualOpen((e.target as HTMLDetailsElement).open)
-              }
+              onToggle={(e) => setManualOpen((e.target as HTMLDetailsElement).open)}
             >
               <summary>Add an asset manually</summary>
               <div className="manual-grid">
@@ -1054,11 +977,7 @@ export default function App() {
                       placeholder="0x…"
                       spellCheck={false}
                     />
-                    <button
-                      className="btn ghost"
-                      onClick={handleAddToken}
-                      disabled={manualBusy}
-                    >
+                    <button className="btn ghost" onClick={handleAddToken} disabled={manualBusy}>
                       Add token
                     </button>
                   </div>
@@ -1079,11 +998,7 @@ export default function App() {
                       placeholder="token id"
                       spellCheck={false}
                     />
-                    <button
-                      className="btn ghost"
-                      onClick={handleAddNft}
-                      disabled={manualBusy}
-                    >
+                    <button className="btn ghost" onClick={handleAddNft} disabled={manualBusy}>
                       Add NFT
                     </button>
                   </div>
@@ -1094,10 +1009,9 @@ export default function App() {
 
             {!scanning && erc20s.length === 0 && nfts.length === 0 && (
               <p className="muted">
-                Nothing detected yet. Configure the token-discovery proxy URL in
-                Settings to auto-detect all tokens (without it, only a built-in
-                token list is checked). NFTs aren’t auto-detected — add them with
-                “Add an asset manually”.
+                Nothing detected yet. Configure the token-discovery proxy URL in Settings to
+                auto-detect all tokens (without it, only a built-in token list is checked). NFTs
+                aren’t auto-detected — add them with “Add an asset manually”.
               </p>
             )}
 
@@ -1166,9 +1080,8 @@ export default function App() {
                         : it.amount.toString()}
                     </td>
                     <td className="muted">
-                      {it.asset.kind === "erc20" &&
-                      valueOf(it.asset, it.amount) !== undefined
-                        ? `≈ ${formatUsd(valueOf(it.asset, it.amount)!)}`
+                      {it.asset.kind === "erc20" && tokenValueUsd(it.asset, it.amount) !== undefined
+                        ? `≈ ${formatUsd(tokenValueUsd(it.asset, it.amount)!)}`
                         : "—"}
                     </td>
                   </tr>
@@ -1189,8 +1102,8 @@ export default function App() {
             </table>
 
             <p className="muted small">
-              {selectedItems.length} transfer(s) ·{" "}
-              {chunk(selectedItems, MAX_CALLS_PER_TX).length} transaction(s)
+              {selectedItems.length} transfer(s) · {chunk(selectedItems, MAX_CALLS_PER_TX).length}{" "}
+              transaction(s)
             </p>
 
             <div className="nav-inline">
@@ -1207,8 +1120,8 @@ export default function App() {
             {mError && <p className="error">{mError}</p>}
 
             <div className="banner warn small">
-              ⚠ Transfers are irreversible. Confirm the recipient address is
-              correct. If you proved ownership above, the address is verified.
+              ⚠ Transfers are irreversible. Confirm the recipient address is correct. If you proved
+              ownership above, the address is verified.
             </div>
 
             <div className="nav">
@@ -1254,8 +1167,7 @@ export default function App() {
 
             {mStatus === "done" && (
               <div className="banner ok">
-                ✓ Migration submitted. Verify balances in the receiving wallet and
-                on the explorer.
+                ✓ Migration submitted. Verify balances in the receiving wallet and on the explorer.
               </div>
             )}
           </Section>
@@ -1264,30 +1176,12 @@ export default function App() {
 
       <footer className="foot">
         <span>
-          Open-source migration tool · your wallet signs every action · keys
-          never leave your browser.
+          Open-source migration tool · your wallet signs every action · keys never leave your
+          browser.
         </span>
       </footer>
 
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
     </div>
-  );
-}
-
-function Section({
-  title,
-  sub,
-  children,
-}: {
-  title: string;
-  sub?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="card">
-      <h2>{title}</h2>
-      {sub && <p className="sub">{sub}</p>}
-      {children}
-    </section>
   );
 }

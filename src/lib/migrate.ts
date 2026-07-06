@@ -1,13 +1,13 @@
 import {
   type AccountInterface,
   type Call,
+  CallData,
   type Signature,
   type TypedData,
-  CallData,
   cairo,
 } from "starknet";
-import type { Asset } from "./types";
 import { CHAIN_ID, DAPP_NAME, MAX_CALLS_PER_TX } from "../config";
+import type { Asset } from "./types";
 
 export interface MigrationItem {
   asset: Asset;
@@ -16,11 +16,7 @@ export interface MigrationItem {
 }
 
 /** Build an ERC-20 `transfer(to, amount)` call. */
-export function erc20TransferCall(
-  token: string,
-  to: string,
-  amount: bigint,
-): Call {
+export function erc20TransferCall(token: string, to: string, amount: bigint): Call {
   return {
     contractAddress: token,
     entrypoint: "transfer",
@@ -55,11 +51,7 @@ export function buildCall(item: MigrationItem, from: string, to: string): Call {
   };
 }
 
-export function buildCalls(
-  items: MigrationItem[],
-  from: string,
-  to: string,
-): Call[] {
+export function buildCalls(items: MigrationItem[], from: string, to: string): Call[] {
   return items.map((it) => buildCall(it, from, to));
 }
 
@@ -77,10 +69,7 @@ export interface ExecResult {
   transactionHash: string;
 }
 
-export async function executeCalls(
-  account: AccountInterface,
-  calls: Call[],
-): Promise<ExecResult> {
+export async function executeCalls(account: AccountInterface, calls: Call[]): Promise<ExecResult> {
   const res = await account.execute(calls);
   return { transactionHash: res.transaction_hash };
 }
@@ -142,7 +131,7 @@ export async function verifyOwnership(
   account: AccountInterface,
   typedData: TypedData,
   signature: Signature,
-  receiver: string,
+  receiver: string
 ): Promise<boolean> {
   try {
     return await account.verifyMessageInStarknet(typedData, signature, receiver);

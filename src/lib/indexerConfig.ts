@@ -18,8 +18,7 @@ export function getIndexerConfig(): DiscoveryConfig {
 }
 
 export function setIndexerConfig(cfg: Partial<DiscoveryConfig>) {
-  if (cfg.proxyUrl !== undefined)
-    localStorage.setItem(LS.proxyUrl, cfg.proxyUrl.trim());
+  if (cfg.proxyUrl !== undefined) localStorage.setItem(LS.proxyUrl, cfg.proxyUrl.trim());
   if (cfg.nftUrlTemplate !== undefined)
     localStorage.setItem(LS.nftUrlTemplate, cfg.nftUrlTemplate.trim());
 }
