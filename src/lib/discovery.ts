@@ -1,14 +1,15 @@
-import { RpcProvider, cairo } from "starknet";
-import { MAINNET_TOKENS } from "./tokens";
+import { type RpcProvider, cairo } from "starknet";
+import { addressKey } from "./address";
 import { MAINNET_NFT_COLLECTIONS } from "./collections";
-import type { Erc20Asset, NftAsset } from "./types";
 import { decodeCairoString } from "./decode";
 import { addressesEqual, normalizeAddress, u256FromFelts } from "./format";
 import { getIndexerConfig } from "./indexerConfig";
+import { MAINNET_TOKENS } from "./tokens";
+import type { Erc20Asset, NftAsset } from "./types";
 
 /** Addresses that can pay fees (ETH, STRK), keyed by numeric value. */
 const GAS_TOKEN_VALUES = new Set(
-  MAINNET_TOKENS.filter((t) => t.isGasToken).map((t) => BigInt(t.address)),
+  MAINNET_TOKENS.filter((t) => t.isGasToken).map((t) => BigInt(t.address))
 );
 function isGasTokenAddress(addr: string): boolean {
   try {
@@ -19,10 +20,7 @@ function isGasTokenAddress(addr: string): boolean {
 }
 
 /** Whether a contract (account) is deployed on-chain at `address`. */
-export async function isDeployed(
-  provider: RpcProvider,
-  address: string,
-): Promise<boolean> {
+export async function isDeployed(provider: RpcProvider, address: string): Promise<boolean> {
   try {
     const h = await provider.getClassHashAt(address);
     return !!h && BigInt(h) !== 0n;
@@ -35,7 +33,7 @@ export async function isDeployed(
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T, index: number) => Promise<R>,
+  fn: (item: T, index: number) => Promise<R>
 ): Promise<R[]> {
   const ret: R[] = new Array(items.length);
   let idx = 0;
@@ -45,17 +43,11 @@ async function mapLimit<T, R>(
       ret[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length || 1) }, worker),
-  );
+  await Promise.all(Array.from({ length: Math.min(limit, items.length || 1) }, worker));
   return ret;
 }
 
-async function readBalance(
-  provider: RpcProvider,
-  token: string,
-  owner: string,
-): Promise<bigint> {
+async function readBalance(provider: RpcProvider, token: string, owner: string): Promise<bigint> {
   let res: string[];
   try {
     res = await provider.callContract({
@@ -87,18 +79,10 @@ interface Candidate {
   isGasToken?: boolean;
 }
 
-function numKey(addr: string): string {
-  try {
-    return BigInt(addr).toString();
-  } catch {
-    return addr.toLowerCase();
-  }
-}
-
 /** Read `symbol`/`decimals` on-chain for tokens whose metadata is unknown. */
 async function enrichMeta(
   provider: RpcProvider,
-  addr: string,
+  addr: string
 ): Promise<{ symbol?: string; decimals?: number }> {
   const [symRes, decRes] = await Promise.all([
     provider
@@ -122,7 +106,7 @@ async function enrichMeta(
 async function scanBalances(
   provider: RpcProvider,
   owner: string,
-  candidates: Candidate[],
+  candidates: Candidate[]
 ): Promise<Erc20Asset[]> {
   const results = await mapLimit(candidates, 8, async (c) => {
     try {
@@ -161,10 +145,7 @@ async function scanBalances(
  * token the address holds (via Starkscan) and re-reads live balances on-chain.
  * Without a proxy, it checks the built-in token list over RPC (keyless).
  */
-export async function scanErc20(
-  provider: RpcProvider,
-  owner: string,
-): Promise<Erc20ScanResult> {
+export async function scanErc20(provider: RpcProvider, owner: string): Promise<Erc20ScanResult> {
   const cfg = getIndexerConfig();
   if (cfg.proxyUrl) {
     try {
@@ -187,14 +168,11 @@ export async function scanErc20(
 }
 
 /** Curated-list + RPC balance scan (keyless fallback). */
-async function scanErc20ViaRpc(
-  provider: RpcProvider,
-  owner: string,
-): Promise<Erc20Asset[]> {
+async function scanErc20ViaRpc(provider: RpcProvider, owner: string): Promise<Erc20Asset[]> {
   return scanBalances(
     provider,
     owner,
-    MAINNET_TOKENS.map((t) => ({ ...t })),
+    MAINNET_TOKENS.map((t) => ({ ...t }))
   );
 }
 
@@ -206,7 +184,7 @@ async function scanErc20ViaRpc(
 async function scanErc20ViaProxy(
   provider: RpcProvider,
   owner: string,
-  proxyUrl: string,
+  proxyUrl: string
 ): Promise<Erc20Asset[]> {
   const base = proxyUrl.replace(/\/+$/, "");
   const r = await fetch(`${base}/token-holdings?address=${owner}`, {
@@ -218,17 +196,14 @@ async function scanErc20ViaProxy(
   }
   const j: any = await r.json();
   const items: any[] = j.items ?? j.holdings ?? j.data ?? [];
-  const curated = new Map(
-    MAINNET_TOKENS.map((t) => [numKey(t.address), t] as const),
-  );
+  const curated = new Map(MAINNET_TOKENS.map((t) => [addressKey(t.address), t] as const));
   const seen = new Set<string>();
   const candidates: Candidate[] = [];
   for (const it of items) {
-    const raw =
-      it.normalizedTokenAddress ?? it.tokenAddress ?? it.token ?? it.address;
+    const raw = it.normalizedTokenAddress ?? it.tokenAddress ?? it.token ?? it.address;
     if (!raw) continue;
     const addr = normalizeAddress(raw) ?? raw;
-    const key = numKey(addr);
+    const key = addressKey(addr);
     if (seen.has(key)) continue;
     seen.add(key);
     const cur = curated.get(key);
@@ -247,7 +222,7 @@ async function scanErc20ViaProxy(
 export async function lookupErc20(
   provider: RpcProvider,
   address: string,
-  owner: string,
+  owner: string
 ): Promise<Erc20Asset> {
   const addr = normalizeAddress(address);
   if (!addr) throw new Error("Invalid contract address.");
@@ -277,7 +252,7 @@ export async function lookupErc20(
 async function ownerOf(
   provider: RpcProvider,
   contract: string,
-  tokenId: bigint,
+  tokenId: bigint
 ): Promise<string | null> {
   const u = cairo.uint256(tokenId);
   const calldata = [u.low.toString(), u.high.toString()];
@@ -301,7 +276,7 @@ export async function lookupNft(
   provider: RpcProvider,
   contract: string,
   tokenIdInput: string,
-  owner: string,
+  owner: string
 ): Promise<NftAsset> {
   const addr = normalizeAddress(contract);
   if (!addr) throw new Error("Invalid NFT contract address.");
@@ -314,7 +289,7 @@ export async function lookupNft(
   const holder = await ownerOf(provider, addr, tokenId);
   if (!holder) {
     throw new Error(
-      "Could not read ownerOf for this token — it may not be a standard ERC-721, or the ID is wrong.",
+      "Could not read ownerOf for this token — it may not be a standard ERC-721, or the ID is wrong."
     );
   }
   if (!addressesEqual(holder, owner)) {
@@ -366,10 +341,7 @@ const ENUMERATE_CAP = 50n;
  * (`balanceOf` + Enumerable token IDs). If a custom NFT holdings URL is set in
  * Settings, that indexer is used instead.
  */
-export async function scanNfts(
-  provider: RpcProvider,
-  owner: string,
-): Promise<NftScanResult> {
+export async function scanNfts(provider: RpcProvider, owner: string): Promise<NftScanResult> {
   const cfg = getIndexerConfig();
   if (cfg.nftUrlTemplate) return scanNftsViaCustomUrl(owner);
   return scanNftsViaRpc(provider, owner);
@@ -384,7 +356,7 @@ async function tryEnumerate(
   provider: RpcProvider,
   contract: string,
   owner: string,
-  balance: bigint,
+  balance: bigint
 ): Promise<{ ids: bigint[]; truncated: boolean } | null> {
   const cap = balance > ENUMERATE_CAP ? ENUMERATE_CAP : balance;
   for (const entrypoint of ["token_of_owner_by_index", "tokenOfOwnerByIndex"]) {
@@ -410,10 +382,7 @@ async function tryEnumerate(
 }
 
 /** Plain-RPC NFT scan: balanceOf per curated collection, Enumerable for IDs. */
-export async function scanNftsViaRpc(
-  provider: RpcProvider,
-  owner: string,
-): Promise<NftScanResult> {
+export async function scanNftsViaRpc(provider: RpcProvider, owner: string): Promise<NftScanResult> {
   const assets: NftAsset[] = [];
   const manualNeeded: HeldCollection[] = [];
   await mapLimit(MAINNET_NFT_COLLECTIONS, 6, async (col) => {
@@ -476,8 +445,7 @@ async function scanNftsViaCustomUrl(owner: string): Promise<NftScanResult> {
       };
     }
     const j: any = await r.json();
-    const items: any[] =
-      j.data ?? j.items ?? j.results ?? j.holdings ?? j.nfts ?? [];
+    const items: any[] = j.data ?? j.items ?? j.results ?? j.holdings ?? j.nfts ?? [];
     for (const it of items) {
       const contract: string | undefined =
         it.contract_address ?? it.contractAddress ?? it.contract?.address;
@@ -496,12 +464,8 @@ async function scanNftsViaCustomUrl(owner: string): Promise<NftScanResult> {
         bal = 1n;
       }
       if (bal <= 0n) continue;
-      const typeStr = String(
-        it.contract?.type ?? it.token_standard ?? it.type ?? "",
-      ).toLowerCase();
-      const kind: "erc721" | "erc1155" = typeStr.includes("1155")
-        ? "erc1155"
-        : "erc721";
+      const typeStr = String(it.contract?.type ?? it.token_standard ?? it.type ?? "").toLowerCase();
+      const kind: "erc721" | "erc1155" = typeStr.includes("1155") ? "erc1155" : "erc721";
       const addr = normalizeAddress(contract) ?? contract;
       out.push({
         kind,
@@ -510,13 +474,9 @@ async function scanNftsViaCustomUrl(owner: string): Promise<NftScanResult> {
         tokenId,
         balance: bal,
         name: it.name ?? it.nft_metadata?.name ?? it.metadata?.name,
-        collectionName:
-          it.contract?.name ?? it.collection_name ?? it.collection?.name,
+        collectionName: it.contract?.name ?? it.collection_name ?? it.collection?.name,
         imageUrl:
-          it.image_url ??
-          it.image_medium_url ??
-          it.nft_metadata?.image ??
-          it.metadata?.image,
+          it.image_url ?? it.image_medium_url ?? it.nft_metadata?.image ?? it.metadata?.image,
         source: "indexer",
       });
     }

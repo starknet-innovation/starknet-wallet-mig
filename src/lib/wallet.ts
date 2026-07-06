@@ -1,7 +1,7 @@
-import { connect, disconnect } from "starknetkit";
 import type { AccountInterface } from "starknet";
-import { makeProvider } from "./provider";
+import { connect, disconnect } from "starknetkit";
 import { CHAIN_ID, DAPP_NAME } from "../config";
+import { makeProvider } from "./provider";
 
 export interface WalletConnection {
   address: string;
@@ -12,7 +12,7 @@ export interface WalletConnection {
 
 /** Open the wallet modal and return a connected account, or null if cancelled. */
 export async function connectWallet(
-  modalMode: "alwaysAsk" | "canAsk" = "alwaysAsk",
+  modalMode: "alwaysAsk" | "canAsk" = "alwaysAsk"
 ): Promise<WalletConnection | null> {
   const { connector, connectorData } = await connect({
     modalMode,

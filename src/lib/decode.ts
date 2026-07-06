@@ -37,8 +37,8 @@ export function decodeCairoString(felts: string[]): string {
 
 function pushFeltBytes(felt: string, len: number, out: number[]) {
   let hex = BigInt(felt).toString(16);
-  if (hex.length % 2) hex = "0" + hex;
-  let bytes = (hex.match(/.{2}/g) ?? []).map((h) => parseInt(h, 16));
+  if (hex.length % 2) hex = `0${hex}`;
+  let bytes = (hex.match(/.{2}/g) ?? []).map((h) => Number.parseInt(h, 16));
   while (bytes.length < len) bytes.unshift(0);
   bytes = bytes.slice(bytes.length - len);
   for (const b of bytes) out.push(b);

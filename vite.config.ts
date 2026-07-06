@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 // `base: "./"` makes all asset URLs relative, so the build works whether it is
@@ -9,10 +9,7 @@ import { nodePolyfills } from "vite-plugin-node-polyfills";
 // nodePolyfills provides Buffer/process/global that some wallet-connector
 // dependencies (WalletConnect, Argent mobile) expect to exist in the browser.
 export default defineConfig({
-  plugins: [
-    react(),
-    nodePolyfills({ globals: { Buffer: true, global: true, process: true } }),
-  ],
+  plugins: [react(), nodePolyfills({ globals: { Buffer: true, global: true, process: true } })],
   base: "./",
   build: {
     target: "es2022",

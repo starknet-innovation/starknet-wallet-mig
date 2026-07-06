@@ -1,7 +1,7 @@
 import { useState } from "react";
+import { DEFAULT_RPC_URL } from "../config";
 import { getIndexerConfig, setIndexerConfig } from "../lib/indexerConfig";
 import { getRpcUrl, setRpcUrl } from "../lib/provider";
-import { DEFAULT_RPC_URL } from "../config";
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const idx = getIndexerConfig();
@@ -30,16 +30,17 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <label className="field">
           <span>Starknet RPC URL</span>
           <input value={rpc} onChange={(e) => setRpc(e.target.value)} spellCheck={false} />
-          <small>Public, CORS-open mainnet RPC. Used for balance reads &amp; signature checks.</small>
+          <small>
+            Public, CORS-open mainnet RPC. Used for balance reads &amp; signature checks.
+          </small>
         </label>
 
         <hr />
         <h3>Token-discovery proxy (Cloudflare Worker)</h3>
         <p className="muted">
-          Base URL of the Worker in <code>/worker</code>. It holds the Starkscan
-          API key server-side and lists every token the wallet holds — no key
-          ever lives in the browser. Leave blank to fall back to the built-in
-          token list. Deploy steps are in <code>worker/README.md</code>.
+          Base URL of the Worker in <code>/worker</code>. It holds the Starkscan API key server-side
+          and lists every token the wallet holds — no key ever lives in the browser. Leave blank to
+          fall back to the built-in token list. Deploy steps are in <code>worker/README.md</code>.
         </p>
         <label className="field">
           <span>Proxy URL</span>
@@ -54,9 +55,9 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <hr />
         <h3>Custom NFT holdings URL (optional)</h3>
         <p className="muted">
-          Starkscan can’t list NFTs by owner. If you have another provider, put
-          its URL here using <code>{"{address}"}</code> as a placeholder. Leave
-          blank to add NFTs manually (each is verified on-chain).
+          Starkscan can’t list NFTs by owner. If you have another provider, put its URL here using{" "}
+          <code>{"{address}"}</code> as a placeholder. Leave blank to add NFTs manually (each is
+          verified on-chain).
         </p>
         <label className="field">
           <span>NFT holdings URL template</span>

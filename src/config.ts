@@ -34,8 +34,7 @@ export const DEFAULT_PROXY_URL = import.meta.env.VITE_PROXY_URL ?? "";
 
 /** Block explorer for linking out to transactions. */
 export const EXPLORER_TX = (hash: string) => `https://starkscan.co/tx/${hash}`;
-export const EXPLORER_CONTRACT = (addr: string) =>
-  `https://starkscan.co/contract/${addr}`;
+export const EXPLORER_CONTRACT = (addr: string) => `https://starkscan.co/contract/${addr}`;
 
 /** Max calls per multicall transaction. Large migrations are chunked. */
 export const MAX_CALLS_PER_TX = 40;

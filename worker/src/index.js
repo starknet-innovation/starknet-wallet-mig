@@ -21,14 +21,13 @@
  */
 
 const STARKSCAN_BASE = "https://api.starkscan.co";
-const DEFAULT_ALLOWED_ORIGINS = [
-  "https://starknet-innovation.github.io",
-  "http://localhost:5173",
-];
+const DEFAULT_ALLOWED_ORIGINS = ["https://starknet-innovation.github.io", "http://localhost:5173"];
 
 function allowedOrigins(env) {
   if (env && typeof env.ALLOWED_ORIGINS === "string" && env.ALLOWED_ORIGINS.trim()) {
-    return env.ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean);
+    return env.ALLOWED_ORIGINS.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
   return DEFAULT_ALLOWED_ORIGINS;
 }
@@ -88,9 +87,7 @@ export default {
         let guard = 0;
         do {
           guard++;
-          const api = new URL(
-            `${STARKSCAN_BASE}/v1/${chain}/address/${address}/token-holdings`,
-          );
+          const api = new URL(`${STARKSCAN_BASE}/v1/${chain}/address/${address}/token-holdings`);
           if (cursor) api.searchParams.set("cursor", cursor);
           const r = await fetch(api.toString(), {
             headers: {
@@ -112,7 +109,7 @@ export default {
               { error: `starkscan ${r.status}`, hint, detail: body.slice(0, 200) },
               502,
               origin,
-              env,
+              env
             );
           }
           const data = await r.json();
@@ -123,10 +120,10 @@ export default {
         return json({ items }, 200, origin, env);
       } catch (e) {
         return json(
-          { error: "upstream failure", detail: String(e && e.message ? e.message : e) },
+          { error: "upstream failure", detail: String(e?.message ?? e) },
           502,
           origin,
-          env,
+          env
         );
       }
     }

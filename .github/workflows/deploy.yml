@@ -25,6 +25,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check
+      - run: npm test
       - run: npm run build
         env:
           # Set repo variable PROXY_URL (Settings → Secrets and variables →

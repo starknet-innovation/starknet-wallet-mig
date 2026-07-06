@@ -1,4 +1,5 @@
-import { validateAndParseAddress } from "starknet";
+// Re-export address utilities from the canonical module for backward compat in this file's consumers.
+export { addressKey, addressesEqual, normalizeAddress } from "./address";
 
 /** Combine two u256 felts (low, high) into a single bigint. */
 export function u256FromFelts(low: string | bigint, high: string | bigint): bigint {
@@ -8,11 +9,11 @@ export function u256FromFelts(low: string | bigint, high: string | bigint): bigi
 /** Format a raw integer balance with `decimals` into a human string. */
 export function formatUnits(value: bigint, decimals: number): string {
   const neg = value < 0n;
-  let v = neg ? -value : value;
+  const v = neg ? -value : value;
   const base = 10n ** BigInt(decimals);
   const whole = v / base;
   const frac = v % base;
-  let fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+  const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
   const out = fracStr ? `${whole}.${fracStr}` : `${whole}`;
   return neg ? `-${out}` : out;
 }
@@ -36,25 +37,4 @@ export function shortenAddress(addr: string, lead = 6, tail = 4): string {
   if (!addr) return "";
   if (addr.length <= lead + tail) return addr;
   return `${addr.slice(0, lead)}…${addr.slice(-tail)}`;
-}
-
-/**
- * Validate + normalize a Starknet address to a 0x-prefixed, zero-padded felt.
- * Returns null when invalid (instead of throwing) for use in form validation.
- */
-export function normalizeAddress(addr: string): string | null {
-  try {
-    return validateAndParseAddress(addr.trim());
-  } catch {
-    return null;
-  }
-}
-
-/** Compare two addresses by numeric value (tolerant of padding/casing). */
-export function addressesEqual(a: string, b: string): boolean {
-  try {
-    return BigInt(a) === BigInt(b);
-  } catch {
-    return false;
-  }
 }

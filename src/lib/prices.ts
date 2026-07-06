@@ -1,4 +1,5 @@
 import { CallData, type RpcProvider } from "starknet";
+import { addressKey } from "./address";
 import { chunk } from "./migrate";
 
 /**
@@ -19,11 +20,9 @@ import { chunk } from "./migrate";
  * (2026-06-29): ETH/STRK/WBTC within ~0.6% of spot. (USDC->USDC returning
  * exactly 2^128 was a hardcoded early-return, NOT a real validation.)
  */
-const PRICE_FETCHER =
-  "0x04946fb4ad5237d97bbb1256eba2080c4fe1de156da6a7f83e3b4823bb6d7da1";
+const PRICE_FETCHER = "0x04946fb4ad5237d97bbb1256eba2080c4fe1de156da6a7f83e3b4823bb6d7da1";
 // USDT (6 decimals) — fresh EKUBO oracle leg, unlike USDC.
-const QUOTE_TOKEN =
-  "0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8";
+const QUOTE_TOKEN = "0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8";
 const QUOTE_DECIMALS = 6;
 const TWAP_PERIOD = 300n; // seconds
 const MIN_TOKEN = 0n; // accept any liquidity (display-only)
@@ -36,20 +35,12 @@ const STABLES = new Set(
     "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8", // USDC
     "0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8", // USDT
     "0x05574eb6b8789a91466f902c380d978e472db68170ff82a5b650b95a58ddf4ad", // DAI
-  ].map((a) => BigInt(a).toString()),
+  ].map((a) => BigInt(a).toString())
 );
 
 export interface PricedToken {
   address: string;
   decimals: number;
-}
-
-function numKey(addr: string): string {
-  try {
-    return BigInt(addr).toString();
-  } catch {
-    return addr.toLowerCase();
-  }
 }
 
 /**
@@ -59,15 +50,15 @@ function numKey(addr: string): string {
  */
 export async function fetchUsdPrices(
   provider: RpcProvider,
-  tokens: PricedToken[],
+  tokens: PricedToken[]
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (tokens.length === 0) return out;
 
   // Pin known stablecoins to $1 (oracle is unreliable for them).
   const oraclePriced = tokens.filter((t) => {
-    if (STABLES.has(numKey(t.address))) {
-      out.set(numKey(t.address), 1);
+    if (STABLES.has(addressKey(t.address))) {
+      out.set(addressKey(t.address), 1);
       return false;
     }
     return true;
@@ -94,11 +85,7 @@ export async function fetchUsdPrices(
   return out;
 }
 
-function decodeInto(
-  res: string[],
-  group: PricedToken[],
-  out: Map<string, number>,
-) {
+function decodeInto(res: string[], group: PricedToken[], out: Map<string, number>) {
   let i = 0;
   const n = Number(BigInt(res[i++] ?? "0"));
   for (let k = 0; k < n && k < group.length; k++) {
@@ -109,12 +96,12 @@ function decodeInto(
       const x128 = low + (high << 128n);
       const t = group[k];
       const usd = (Number(x128) / TWO_128) * 10 ** (t.decimals - QUOTE_DECIMALS);
-      if (Number.isFinite(usd) && usd > 0) out.set(numKey(t.address), usd);
+      if (Number.isFinite(usd) && usd > 0) out.set(addressKey(t.address), usd);
     }
     // variants 0/1/2 carry no extra felts — nothing to skip.
   }
 }
 
 export function priceKey(addr: string): string {
-  return numKey(addr);
+  return addressKey(addr);
 }
