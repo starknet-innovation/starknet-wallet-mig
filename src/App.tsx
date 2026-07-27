@@ -188,9 +188,9 @@ export default function App() {
   const allAssets: Asset[] = useMemo(() => [...erc20s, ...nfts], [erc20s, nfts]);
   const allErc20sSelected = erc20s.length > 0 && erc20s.every((asset) => selected[asset.id]);
   const hasSelectedErc20s = erc20s.some((asset) => selected[asset.id]);
-  const hasSelectedSubDollarErc20s = erc20s.some((asset) => {
+  const hasSelectedLowOrUnpricedErc20s = erc20s.some((asset) => {
     const value = tokenValueUsd(asset, asset.balance);
-    return selected[asset.id] && value !== undefined && value < 1;
+    return selected[asset.id] && (value === undefined || value < 1);
   });
   const allNftsSelected = nfts.length > 0 && nfts.every((asset) => selected[asset.id]);
   const hasSelectedNfts = nfts.some((asset) => selected[asset.id]);
@@ -637,12 +637,12 @@ export default function App() {
       return next;
     });
   }
-  function deselectSubDollarErc20s() {
+  function deselectLowOrUnpricedErc20s() {
     setSelected((s) => {
       const next = { ...s };
       for (const asset of erc20s) {
         const value = tokenValueUsd(asset, asset.balance);
-        if (value !== undefined && value < 1) next[asset.id] = false;
+        if (value === undefined || value < 1) next[asset.id] = false;
       }
       return next;
     });
@@ -933,11 +933,11 @@ export default function App() {
                     </button>
                     <button
                       className="btn ghost"
-                      onClick={deselectSubDollarErc20s}
-                      disabled={scanning || !hasSelectedSubDollarErc20s}
-                      title="Deselect priced tokens worth less than $1. Unpriced tokens stay selected."
+                      onClick={deselectLowOrUnpricedErc20s}
+                      disabled={scanning || !hasSelectedLowOrUnpricedErc20s}
+                      title="Deselect tokens worth less than $1, including $0 and unpriced tokens."
                     >
-                      Deselect &lt; $1
+                      Deselect &lt; $1 + unpriced
                     </button>
                   </div>
                 </div>
