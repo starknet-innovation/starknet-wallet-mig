@@ -1,6 +1,6 @@
 import { type RpcProvider, cairo } from "starknet";
 import { addressKey } from "./address";
-import { MAINNET_NFT_COLLECTIONS } from "./collections";
+import { MAINNET_NFT_COLLECTIONS, type NftCollectionInfo } from "./collections";
 import { decodeCairoString } from "./decode";
 import { addressesEqual, normalizeAddress, u256FromFelts } from "./format";
 import { getIndexerConfig } from "./indexerConfig";
@@ -327,7 +327,7 @@ export interface HeldCollection {
 
 export interface NftScanResult {
   assets: NftAsset[];
-  /** Held collections that aren't Enumerable — token IDs must be added manually. */
+  /** Held collections whose token IDs could not be resolved automatically. */
   manualNeeded?: HeldCollection[];
   error?: string;
   notice?: string;
@@ -335,15 +335,30 @@ export interface NftScanResult {
 
 /** Max token IDs to enumerate per collection (avoids huge loops). */
 const ENUMERATE_CAP = 50n;
+/** Only scan compact sequential ID spaces; larger collections use indexed transfers. */
+const SEQUENTIAL_SCAN_CAP = 1_000n;
 
 /**
- * NFT discovery. Default = plain RPC over the curated collection list
- * (`balanceOf` + Enumerable token IDs). If a custom NFT holdings URL is set in
- * Settings, that indexer is used instead.
+ * NFT discovery. Indexed candidates are always checked against live on-chain
+ * ownership. Plain RPC over the curated collection list is the fallback.
  */
 export async function scanNfts(provider: RpcProvider, owner: string): Promise<NftScanResult> {
   const cfg = getIndexerConfig();
-  if (cfg.nftUrlTemplate) return scanNftsViaCustomUrl(owner);
+  if (cfg.nftUrlTemplate) return scanNftsViaCustomUrl(provider, owner);
+  if (cfg.proxyUrl) {
+    try {
+      const assets = await scanNftsViaProxy(provider, owner, cfg.proxyUrl);
+      return { assets };
+    } catch (error) {
+      const fallback = await scanNftsViaRpc(provider, owner);
+      const message = error instanceof Error ? error.message : "unknown error";
+      return {
+        ...fallback,
+        notice:
+          `NFT indexer failed (${message}). Used on-chain collection checks instead. ${fallback.notice ?? ""}`.trim(),
+      };
+    }
+  }
   return scanNftsViaRpc(provider, owner);
 }
 
@@ -381,11 +396,215 @@ async function tryEnumerate(
   return null;
 }
 
-/** Plain-RPC NFT scan: balanceOf per curated collection, Enumerable for IDs. */
+async function readErc1155Balance(
+  provider: RpcProvider,
+  contract: string,
+  owner: string,
+  tokenId: bigint
+): Promise<bigint> {
+  const id = cairo.uint256(tokenId);
+  const calldata = [owner, id.low.toString(), id.high.toString()];
+  for (const entrypoint of ["balance_of", "balanceOf"]) {
+    try {
+      const res = await provider.callContract({ contractAddress: contract, entrypoint, calldata });
+      return readU256(res);
+    } catch {
+      /* try next */
+    }
+  }
+  return 0n;
+}
+
+function nftAsset(
+  col: NftCollectionInfo,
+  address: string,
+  tokenId: bigint,
+  balance = 1n
+): NftAsset {
+  return {
+    kind: col.standard === "erc1155" ? "erc1155" : "erc721",
+    id: `${address}:${tokenId.toString()}`,
+    address,
+    tokenId,
+    balance,
+    collectionName: col.name,
+    source: "indexer",
+  };
+}
+
+/** Try a collection-specific owner → token ID view, then verify it with ownerOf. */
+async function tryOwnerToken(
+  provider: RpcProvider,
+  col: NftCollectionInfo,
+  address: string,
+  owner: string
+): Promise<NftAsset[]> {
+  if (!col.ownerTokenEntrypoint || col.standard === "erc1155") return [];
+  try {
+    const res = await provider.callContract({
+      contractAddress: address,
+      entrypoint: col.ownerTokenEntrypoint,
+      calldata: [owner],
+    });
+    const tokenId = readU256(res);
+    const holder = await ownerOf(provider, address, tokenId);
+    return holder && addressesEqual(holder, owner) ? [nftAsset(col, address, tokenId)] : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve compact collections by checking their complete ID space. The count
+ * views in the curated list are deliberately limited to small collections.
+ */
+async function trySequentialOwnership(
+  provider: RpcProvider,
+  col: NftCollectionInfo,
+  address: string,
+  owner: string
+): Promise<{ assets: NftAsset[]; complete: boolean } | null> {
+  if (!col.tokenCountEntrypoint) return null;
+  try {
+    const res = await provider.callContract({
+      contractAddress: address,
+      entrypoint: col.tokenCountEntrypoint,
+      calldata: [],
+    });
+    const count = readU256(res);
+    if (count > SEQUENTIAL_SCAN_CAP) return { assets: [], complete: false };
+
+    // Include `count` itself so this works for both next-ID and total-minted views,
+    // regardless of whether a collection starts numbering at zero or one.
+    const ids = Array.from({ length: Number(count + 1n) }, (_, index) => BigInt(index));
+    const found = await mapLimit(ids, 10, async (tokenId) => {
+      if (col.standard === "erc1155") {
+        const balance = await readErc1155Balance(provider, address, owner, tokenId);
+        return balance > 0n ? nftAsset(col, address, tokenId, balance) : null;
+      }
+      const holder = await ownerOf(provider, address, tokenId);
+      return holder && addressesEqual(holder, owner) ? nftAsset(col, address, tokenId) : null;
+    });
+    return {
+      assets: found.filter((asset): asset is NftAsset => asset !== null),
+      complete: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function scanNftsViaProxy(
+  provider: RpcProvider,
+  owner: string,
+  proxyUrl: string
+): Promise<NftAsset[]> {
+  const base = proxyUrl.replace(/\/+$/, "");
+  const response = await fetch(`${base}/nft-holdings?address=${owner}&chain=SN_MAIN`, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`HTTP ${response.status} ${body.slice(0, 140)}`);
+  }
+  const payload: any = await response.json();
+  if (payload.truncated) {
+    throw new Error("indexed transfer history was truncated");
+  }
+  const items: any[] = payload.items ?? [];
+  const curated = new Map(
+    MAINNET_NFT_COLLECTIONS.map((collection) => [addressKey(collection.address), collection])
+  );
+  const candidates = new Map<
+    string,
+    { address: string; tokenId: bigint; standard: string; collection: NftCollectionInfo }
+  >();
+  for (const item of items) {
+    const rawAddress = item.tokenAddress ?? item.contractAddress ?? item.contract_address;
+    const rawTokenId = item.tokenId ?? item.token_id;
+    if (!rawAddress || rawTokenId == null) continue;
+    try {
+      const address = normalizeAddress(rawAddress) ?? rawAddress;
+      const tokenId = BigInt(rawTokenId);
+      const indexedStandard = String(item.standard ?? item.token_standard ?? "").toLowerCase();
+      const knownCollection = curated.get(addressKey(address));
+      const isErc1155 = knownCollection?.standard === "erc1155" || indexedStandard.includes("1155");
+      const isErc721 = indexedStandard.includes("721");
+      if (!knownCollection && !isErc721 && !isErc1155) continue;
+      const collection: NftCollectionInfo = knownCollection ?? {
+        address,
+        name: item.tokenName ?? item.tokenSymbol ?? `NFT ${address.slice(0, 8)}…`,
+        standard: isErc1155 ? "erc1155" : "erc721",
+      };
+      candidates.set(`${address}:${tokenId}`, {
+        address,
+        tokenId,
+        standard: indexedStandard || collection.standard || "erc721",
+        collection,
+      });
+    } catch {
+      /* ignore malformed indexed candidates */
+    }
+  }
+
+  const verified = await mapLimit([...candidates.values()], 10, async (candidate) => {
+    const isErc1155 =
+      candidate.collection.standard === "erc1155" || candidate.standard.includes("1155");
+    if (isErc1155) {
+      const balance = await readErc1155Balance(
+        provider,
+        candidate.address,
+        owner,
+        candidate.tokenId
+      );
+      return balance > 0n
+        ? nftAsset(
+            { ...candidate.collection, standard: "erc1155" },
+            candidate.address,
+            candidate.tokenId,
+            balance
+          )
+        : null;
+    }
+    const holder = await ownerOf(provider, candidate.address, candidate.tokenId);
+    return holder && addressesEqual(holder, owner)
+      ? nftAsset(candidate.collection, candidate.address, candidate.tokenId)
+      : null;
+  });
+  const assets = new Map(
+    verified
+      .filter((asset): asset is NftAsset => asset !== null)
+      .map((asset) => [asset.id, asset] as const)
+  );
+
+  // Some older ERC-1155 mints were not classified by transfer indexers. Curated
+  // compact ERC-1155 collections can be checked exhaustively with a few live
+  // balance reads, so merge those results into the verified indexed set.
+  const compactErc1155 = MAINNET_NFT_COLLECTIONS.filter(
+    (collection) => collection.standard === "erc1155" && collection.tokenCountEntrypoint
+  );
+  await mapLimit(compactErc1155, 4, async (collection) => {
+    const address = normalizeAddress(collection.address) ?? collection.address;
+    const sequential = await trySequentialOwnership(provider, collection, address, owner);
+    for (const asset of sequential?.assets ?? []) assets.set(asset.id, asset);
+  });
+
+  return [...assets.values()];
+}
+
+/** Plain-RPC NFT scan with automatic ID resolution for curated collections. */
 export async function scanNftsViaRpc(provider: RpcProvider, owner: string): Promise<NftScanResult> {
   const assets: NftAsset[] = [];
   const manualNeeded: HeldCollection[] = [];
   await mapLimit(MAINNET_NFT_COLLECTIONS, 6, async (col) => {
+    const addr = normalizeAddress(col.address) ?? col.address;
+
+    if (col.standard === "erc1155") {
+      const sequential = await trySequentialOwnership(provider, col, addr, owner);
+      if (sequential) assets.push(...sequential.assets);
+      return;
+    }
+
     let balance: bigint;
     try {
       // readBalance tries both balanceOf (camelCase) and balance_of (snake).
@@ -394,7 +613,6 @@ export async function scanNftsViaRpc(provider: RpcProvider, owner: string): Prom
       return; // not a standard ERC-721 / no balance_of
     }
     if (balance <= 0n) return;
-    const addr = normalizeAddress(col.address) ?? col.address;
     const enumerated = await tryEnumerate(provider, addr, owner, balance);
     if (enumerated && enumerated.ids.length > 0) {
       for (const tokenId of enumerated.ids) {
@@ -417,38 +635,47 @@ export async function scanNftsViaRpc(provider: RpcProvider, owner: string): Prom
         });
       }
     } else {
-      manualNeeded.push({
-        address: addr,
-        name: col.name,
-        balance: Number(balance),
-      });
+      const direct = await tryOwnerToken(provider, col, addr, owner);
+      const sequential = await trySequentialOwnership(provider, col, addr, owner);
+      const resolved = new Map<string, NftAsset>();
+      for (const asset of [...direct, ...(sequential?.assets ?? [])]) {
+        resolved.set(asset.id, asset);
+      }
+      assets.push(...resolved.values());
+      if (BigInt(resolved.size) < balance) {
+        manualNeeded.push({
+          address: addr,
+          name: col.name,
+          balance: Number(balance - BigInt(resolved.size)),
+        });
+      }
     }
   });
   const notice = manualNeeded.some((m) => !m.truncated)
-    ? "Some collections you hold aren't enumerable on-chain — add their token IDs manually below (collection pre-filled)."
+    ? "Automatic lookup could not resolve every NFT in one or more legacy collections. Resolved NFTs are selectable below; the manual form remains available for any missing legacy item."
     : undefined;
   return { assets, manualNeeded, notice };
 }
 
-async function scanNftsViaCustomUrl(owner: string): Promise<NftScanResult> {
+async function scanNftsViaCustomUrl(provider: RpcProvider, owner: string): Promise<NftScanResult> {
   const cfg = getIndexerConfig();
   const url = cfg.nftUrlTemplate.replaceAll("{address}", owner);
   const headers: Record<string, string> = { accept: "application/json" };
-  const out: NftAsset[] = [];
   try {
     const r = await fetch(url, { headers });
     if (!r.ok) {
       const body = await r.text().catch(() => "");
       return {
-        assets: out,
+        assets: [],
         error: `NFT indexer responded ${r.status}. ${body.slice(0, 160)}`,
       };
     }
     const j: any = await r.json();
     const items: any[] = j.data ?? j.items ?? j.results ?? j.holdings ?? j.nfts ?? [];
+    const candidates = new Map<string, NftAsset>();
     for (const it of items) {
       const contract: string | undefined =
-        it.contract_address ?? it.contractAddress ?? it.contract?.address;
+        it.tokenAddress ?? it.contract_address ?? it.contractAddress ?? it.contract?.address;
       const rawTokenId = it.token_id ?? it.tokenId ?? it.id;
       if (!contract || rawTokenId == null) continue;
       let tokenId: bigint;
@@ -464,10 +691,12 @@ async function scanNftsViaCustomUrl(owner: string): Promise<NftScanResult> {
         bal = 1n;
       }
       if (bal <= 0n) continue;
-      const typeStr = String(it.contract?.type ?? it.token_standard ?? it.type ?? "").toLowerCase();
+      const typeStr = String(
+        it.standard ?? it.contract?.type ?? it.token_standard ?? it.type ?? ""
+      ).toLowerCase();
       const kind: "erc721" | "erc1155" = typeStr.includes("1155") ? "erc1155" : "erc721";
       const addr = normalizeAddress(contract) ?? contract;
-      out.push({
+      const asset: NftAsset = {
         kind,
         id: `${addr}:${tokenId.toString()}`,
         address: addr,
@@ -478,13 +707,22 @@ async function scanNftsViaCustomUrl(owner: string): Promise<NftScanResult> {
         imageUrl:
           it.image_url ?? it.image_medium_url ?? it.nft_metadata?.image ?? it.metadata?.image,
         source: "indexer",
-      });
+      };
+      candidates.set(asset.id, asset);
     }
-    return { assets: out };
+    const verified = await mapLimit([...candidates.values()], 10, async (asset) => {
+      if (asset.kind === "erc1155") {
+        const balance = await readErc1155Balance(provider, asset.address, owner, asset.tokenId);
+        return balance > 0n ? { ...asset, balance } : null;
+      }
+      const holder = await ownerOf(provider, asset.address, asset.tokenId);
+      return holder && addressesEqual(holder, owner) ? { ...asset, balance: 1n } : null;
+    });
+    return { assets: verified.filter((asset): asset is NftAsset => asset !== null) };
   } catch (e: any) {
     return {
-      assets: out,
-      error: `NFT indexer request failed (network or CORS). ${e?.message ?? ""} — add NFTs manually.`,
+      assets: [],
+      error: `NFT indexer request failed (network or CORS). ${e?.message ?? ""}`,
     };
   }
 }

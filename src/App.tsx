@@ -203,6 +203,30 @@ export default function App() {
       }),
     [erc20s, tokenValueUsd]
   );
+  const nftCollections = useMemo(() => {
+    const groups = new Map<string, { address: string; name: string; assets: NftAsset[] }>();
+    for (const asset of nfts) {
+      const key = asset.address;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.assets.push(asset);
+      } else {
+        groups.set(key, {
+          address: asset.address,
+          name: asset.collectionName ?? asset.name ?? "NFT collection",
+          assets: [asset],
+        });
+      }
+    }
+    return [...groups.values()]
+      .map((collection) => ({
+        ...collection,
+        assets: collection.assets.sort((a, b) =>
+          a.tokenId < b.tokenId ? -1 : a.tokenId > b.tokenId ? 1 : 0
+        ),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [nfts]);
 
   const selectedItems: MigrationItem[] = useMemo(() => {
     const items: MigrationItem[] = [];
@@ -980,53 +1004,88 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <div className="asset-list">
-                  {nfts.map((a) => (
-                    <div className="asset-row" key={a.id}>
-                      <label className="asset-select">
-                        <input
-                          type="checkbox"
-                          checked={!!selected[a.id]}
-                          onChange={() => toggle(a.id)}
-                        />
-                        <span>Include</span>
-                      </label>
-                      {a.imageUrl ? (
-                        <img className="nft-thumb" src={a.imageUrl} alt="" />
-                      ) : (
-                        <div className="nft-thumb placeholder">NFT</div>
-                      )}
-                      <div className="asset-main">
-                        <strong>{a.collectionName ?? a.name ?? "NFT"}</strong>
-                        <div className="muted small">
-                          #{a.tokenId.toString()} ·{" "}
-                          {a.kind === "erc1155" ? `x${a.balance}` : "ERC-721"} ·{" "}
-                          <a href={EXPLORER_CONTRACT(a.address)} target="_blank" rel="noreferrer">
-                            {shortenAddress(a.address)}
-                          </a>
+                <div className="nft-collections">
+                  {nftCollections.map((collection) => {
+                    const selectedCount = collection.assets.filter(
+                      (asset) => selected[asset.id]
+                    ).length;
+                    const collectionSelected = selectedCount === collection.assets.length;
+                    return (
+                      <section className="nft-collection" key={collection.address}>
+                        <div className="nft-collection-head">
+                          <div>
+                            <strong>{collection.name}</strong>
+                            <div className="muted small">
+                              {selectedCount} of {collection.assets.length} selected ·{" "}
+                              <a
+                                href={EXPLORER_CONTRACT(collection.address)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {shortenAddress(collection.address)}
+                              </a>
+                            </div>
+                          </div>
+                          <button
+                            className="btn ghost"
+                            onClick={() =>
+                              setAssetsSelected(collection.assets, !collectionSelected)
+                            }
+                            disabled={scanning}
+                          >
+                            {collectionSelected ? "Deselect collection" : "Select collection"}
+                          </button>
                         </div>
-                      </div>
-                      {a.kind === "erc1155" && (
-                        <div className="asset-amt">
-                          <input
-                            value={amounts[a.id] ?? ""}
-                            onChange={(e) => setAmt(a.id, e.target.value)}
-                            disabled={!selected[a.id]}
-                          />
+                        <div className="asset-list">
+                          {collection.assets.map((a) => (
+                            <div className="asset-row" key={a.id}>
+                              <label className="asset-select">
+                                <input
+                                  type="checkbox"
+                                  checked={!!selected[a.id]}
+                                  onChange={() => toggle(a.id)}
+                                />
+                                <span>Include</span>
+                              </label>
+                              {a.imageUrl ? (
+                                <img className="nft-thumb" src={a.imageUrl} alt="" />
+                              ) : (
+                                <div className="nft-thumb placeholder">NFT</div>
+                              )}
+                              <div className="asset-main">
+                                <strong>#{a.tokenId.toString()}</strong>
+                                <div className="muted small">
+                                  {a.kind === "erc1155"
+                                    ? `ERC-1155 · owned: ${a.balance}`
+                                    : "ERC-721"}
+                                </div>
+                              </div>
+                              {a.kind === "erc1155" && (
+                                <div className="asset-amt">
+                                  <input
+                                    value={amounts[a.id] ?? ""}
+                                    onChange={(e) => setAmt(a.id, e.target.value)}
+                                    disabled={!selected[a.id]}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </section>
+                    );
+                  })}
                 </div>
               </>
             )}
 
             {heldCollections.length > 0 && (
               <>
-                <h3>Detected NFT holdings — token IDs required</h3>
+                <h3>Legacy NFTs needing attention</h3>
                 <p className="muted small">
-                  These collections cannot list token IDs on-chain. Add a token ID to verify
-                  ownership; the NFT is selected for migration automatically after you add it.
+                  Automatic lookup resolved as much as the collection exposes. If an older item is
+                  still missing, you can add its token ID below and ownership will be verified
+                  on-chain.
                 </p>
                 <div className="asset-list">
                   {heldCollections.map((c) => (
@@ -1035,7 +1094,7 @@ export default function App() {
                         <strong>{c.name}</strong>
                         <div className="muted small">
                           Holds {c.balance}
-                          {c.truncated ? "+" : ""} · not enumerable on-chain ·{" "}
+                          {c.truncated ? "+" : ""} unresolved ·{" "}
                           <a href={EXPLORER_CONTRACT(c.address)} target="_blank" rel="noreferrer">
                             {shortenAddress(c.address)}
                           </a>

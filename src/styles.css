@@ -372,6 +372,27 @@ code {
   flex-direction: column;
   gap: 8px;
 }
+.nft-collections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.nft-collection {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.nft-collection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.nft-collection-head .btn {
+  margin-top: 0;
+  white-space: nowrap;
+}
 .asset-row {
   display: flex;
   align-items: center;

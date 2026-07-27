@@ -55,9 +55,9 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <hr />
         <h3>Custom NFT holdings URL (optional)</h3>
         <p className="muted">
-          Starkscan can’t list NFTs by owner. If you have another provider, put its URL here using{" "}
-          <code>{"{address}"}</code> as a placeholder. Leave blank to add NFTs manually (each is
-          verified on-chain).
+          The token-discovery Worker also finds NFTs. To override it with another provider, put its
+          URL here using <code>{"{address}"}</code> as a placeholder. Every returned NFT is still
+          verified on-chain.
         </p>
         <label className="field">
           <span>NFT holdings URL template</span>

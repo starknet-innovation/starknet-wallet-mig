@@ -1,6 +1,6 @@
 # snf-wallet-proxy (Cloudflare Worker)
 
-Server-side proxy for Starkscan token discovery. The frontend calls this Worker;
+Server-side proxy for Starkscan token and NFT discovery. The frontend calls this Worker;
 the Worker holds the Starkscan API key as a secret and calls Starkscan
 server-to-server (avoiding the 403 that Starkscan returns to browser requests).
 
@@ -42,8 +42,12 @@ rejected, protecting the key's request quota.
 ```
 GET /token-holdings?address=0x...&chain=SN_MAIN
 -> { "items": [ { normalizedTokenAddress, indexedBalanceRaw, symbol, name, decimals }, ... ] }
+GET /nft-holdings?address=0x...&chain=SN_MAIN
+-> { "items": [ { tokenAddress, tokenId, standard, ... }, ... ] }
 GET /health -> { "ok": true }
 ```
 
-The frontend uses `items` only as a *candidate list* and re-reads live balances
-on-chain, so a stale indexer snapshot can never inflate a transfer amount.
+The NFT route combines address-scoped transfers with targeted legacy collection
+events. The frontend uses those indexed results only as *candidate lists*: it
+re-reads live token balances, ERC-721 owners, and ERC-1155 balances on-chain, so
+stale indexer data cannot create or inflate a transfer.

@@ -26,9 +26,9 @@ export const RPC_ALTERNATIVES = [
  * Starkscan key ever lives in the browser. Set `VITE_PROXY_URL` at build time
  * (repo variable PROXY_URL) or paste the URL in Settings at runtime.
  *
- * NFT auto-discovery is not offered by Starkscan, so NFTs are added manually
- * (verified on-chain via `ownerOf`); an optional custom NFT holdings URL lets
- * you wire another provider.
+ * The same Worker proxies address-scoped transfer history for NFT discovery.
+ * Indexed NFT IDs are always verified against live on-chain ownership before
+ * the frontend offers them for migration.
  */
 export const DEFAULT_PROXY_URL = import.meta.env.VITE_PROXY_URL ?? "";
 

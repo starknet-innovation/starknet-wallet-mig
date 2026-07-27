@@ -4,8 +4,8 @@ export interface DiscoveryConfig {
   /** Base URL of the token-discovery Worker (Cloudflare). Blank = keyless mode. */
   proxyUrl: string;
   /**
-   * Optional custom URL template for NFT-by-owner discovery (Starkscan has none).
-   * Use `{address}` as a placeholder. Blank → NFTs are added manually.
+   * Optional override for NFT-by-owner discovery.
+   * Use `{address}` as a placeholder. Blank → use the configured Worker.
    */
   nftUrlTemplate: string;
 }
