@@ -118,13 +118,10 @@ export default {
         } while (cursor && guard < 30);
 
         return json({ items }, 200, origin, env);
-      } catch (e) {
-        return json(
-          { error: "upstream failure", detail: String(e?.message ?? e) },
-          502,
-          origin,
-          env
-        );
+      } catch (error) {
+        // Keep exception details in Worker logs; they can expose upstream internals to callers.
+        console.error("Starkscan token-holdings request failed", error);
+        return json({ error: "upstream failure" }, 502, origin, env);
       }
     }
 
