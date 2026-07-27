@@ -386,6 +386,16 @@ code {
   height: 18px;
   flex: none;
 }
+.asset-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .asset-main {
   flex: 1;
   min-width: 0;

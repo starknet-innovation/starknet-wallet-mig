@@ -963,11 +963,14 @@ export default function App() {
                 <div className="asset-list">
                   {nfts.map((a) => (
                     <div className="asset-row" key={a.id}>
-                      <input
-                        type="checkbox"
-                        checked={!!selected[a.id]}
-                        onChange={() => toggle(a.id)}
-                      />
+                      <label className="asset-select">
+                        <input
+                          type="checkbox"
+                          checked={!!selected[a.id]}
+                          onChange={() => toggle(a.id)}
+                        />
+                        <span>Include</span>
+                      </label>
                       {a.imageUrl ? (
                         <img className="nft-thumb" src={a.imageUrl} alt="" />
                       ) : (
@@ -1000,7 +1003,11 @@ export default function App() {
 
             {heldCollections.length > 0 && (
               <>
-                <h3>Detected NFT holdings — add token IDs</h3>
+                <h3>Detected NFT holdings — token IDs required</h3>
+                <p className="muted small">
+                  These collections cannot list token IDs on-chain. Add a token ID to verify
+                  ownership; the NFT is selected for migration automatically after you add it.
+                </p>
                 <div className="asset-list">
                   {heldCollections.map((c) => (
                     <div className="asset-row" key={c.address}>
@@ -1021,7 +1028,7 @@ export default function App() {
                           setManualOpen(true);
                         }}
                       >
-                        Add token ID
+                        Enter token ID
                       </button>
                     </div>
                   ))}
