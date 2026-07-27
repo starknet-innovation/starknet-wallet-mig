@@ -193,6 +193,14 @@ export default function App() {
   const allNftsSelected = nfts.length > 0 && nfts.every((asset) => selected[asset.id]);
   const hasSelectedNfts = nfts.some((asset) => selected[asset.id]);
   const chainOk = sender ? isOnTargetChain(sender.chainId) : true;
+  const sortedErc20s = useMemo(
+    () =>
+      [...erc20s].sort((a, b) => {
+        const valueDiff = (tokenValueUsd(b, b.balance) ?? 0) - (tokenValueUsd(a, a.balance) ?? 0);
+        return valueDiff || a.symbol.localeCompare(b.symbol);
+      }),
+    [erc20s, tokenValueUsd]
+  );
 
   const selectedItems: MigrationItem[] = useMemo(() => {
     const items: MigrationItem[] = [];
@@ -217,6 +225,21 @@ export default function App() {
     }
     return items;
   }, [allAssets, selected, amounts]);
+
+  const selectedErc20Items = useMemo(
+    () =>
+      selectedItems.filter(
+        (item): item is MigrationItem & { asset: Erc20Asset } => item.asset.kind === "erc20"
+      ),
+    [selectedItems]
+  );
+  const selectedNftItems = useMemo(
+    () =>
+      selectedItems.filter(
+        (item): item is MigrationItem & { asset: NftAsset } => item.asset.kind !== "erc20"
+      ),
+    [selectedItems]
+  );
 
   const detectedValue = useMemo(
     () => erc20s.reduce((sum, a) => sum + (tokenValueUsd(a, a.balance) ?? 0), 0),
@@ -875,7 +898,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="asset-list">
-                  {erc20s.map((a) => (
+                  {sortedErc20s.map((a) => (
                     <div className="asset-row" key={a.id}>
                       <input
                         type="checkbox"
@@ -1105,63 +1128,69 @@ export default function App() {
               </div>
             </div>
 
-            <table className="summary">
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Amount</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedItems.map((it) => (
-                  <tr key={it.asset.id}>
-                    <td>
-                      {it.asset.kind === "erc20" ? (
-                        it.asset.symbol
-                      ) : (
-                        <div className="review-nft">
-                          {it.asset.imageUrl ? (
-                            <img className="nft-thumb" src={it.asset.imageUrl} alt="" />
-                          ) : (
-                            <div className="nft-thumb placeholder">NFT</div>
-                          )}
-                          <div>
-                            <strong>{it.asset.collectionName ?? it.asset.name ?? "NFT"}</strong>
-                            <div className="muted small">
-                              #{it.asset.tokenId} ·{" "}
-                              {it.asset.kind === "erc1155" ? "ERC-1155" : "ERC-721"}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {it.asset.kind === "erc20"
-                        ? formatUnits(it.amount, it.asset.decimals)
-                        : it.amount.toString()}
-                    </td>
-                    <td className="muted">
-                      {it.asset.kind === "erc20" && tokenValueUsd(it.asset, it.amount) !== undefined
-                        ? `≈ ${formatUsd(tokenValueUsd(it.asset, it.amount)!)}`
-                        : "—"}
-                    </td>
-                  </tr>
+            {selectedErc20Items.length > 0 && (
+              <>
+                <h3>Tokens to migrate</h3>
+                <table className="summary">
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Amount</th>
+                      <th>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedErc20Items.map((it) => (
+                      <tr key={it.asset.id}>
+                        <td>{it.asset.symbol}</td>
+                        <td>{formatUnits(it.amount, it.asset.decimals)}</td>
+                        <td className="muted">
+                          {tokenValueUsd(it.asset, it.amount) !== undefined
+                            ? `≈ ${formatUsd(tokenValueUsd(it.asset, it.amount)!)} `
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {migratingValue > 0 && (
+                    <tfoot>
+                      <tr>
+                        <td colSpan={2}>
+                          <strong>Total (priced tokens)</strong>
+                        </td>
+                        <td>
+                          <strong>≈ {formatUsd(migratingValue)}</strong>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </>
+            )}
+
+            <h3>NFTs to migrate ({selectedNftItems.length})</h3>
+            {selectedNftItems.length > 0 ? (
+              <div className="asset-list review-nft-list">
+                {selectedNftItems.map((it) => (
+                  <div className="asset-row" key={it.asset.id}>
+                    {it.asset.imageUrl ? (
+                      <img className="nft-thumb" src={it.asset.imageUrl} alt="" />
+                    ) : (
+                      <div className="nft-thumb placeholder">NFT</div>
+                    )}
+                    <div className="asset-main">
+                      <strong>{it.asset.collectionName ?? it.asset.name ?? "NFT"}</strong>
+                      <div className="muted small">
+                        #{it.asset.tokenId} · {it.asset.kind === "erc1155" ? "ERC-1155" : "ERC-721"}
+                      </div>
+                    </div>
+                    <strong>{it.amount.toString()}</strong>
+                  </div>
                 ))}
-              </tbody>
-              {migratingValue > 0 && (
-                <tfoot>
-                  <tr>
-                    <td colSpan={2}>
-                      <strong>Total (priced tokens)</strong>
-                    </td>
-                    <td>
-                      <strong>≈ {formatUsd(migratingValue)}</strong>
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
+              </div>
+            ) : (
+              <p className="muted small">No NFTs are selected for migration.</p>
+            )}
 
             <p className="muted small">
               {selectedItems.length} transfer(s) · {chunk(selectedItems, MAX_CALLS_PER_TX).length}{" "}

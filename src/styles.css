@@ -496,10 +496,8 @@ code {
   color: var(--muted);
   font-weight: 600;
 }
-.review-nft {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.review-nft-list {
+  margin-bottom: 16px;
 }
 
 /* Banners */
