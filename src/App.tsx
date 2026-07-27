@@ -25,6 +25,7 @@ import {
   erc20TransferCall,
   estimateFee,
   executeCalls,
+  findFailingMigrationItems,
   randomNonce,
   verifyOwnership,
 } from "./lib/migrate";
@@ -95,6 +96,38 @@ function defaultAmountInput(a: Asset): string {
   }
   if (a.kind === "erc1155") return a.balance.toString();
   return "1";
+}
+
+function migrationItemLabel(item: MigrationItem): string {
+  const asset = item.asset;
+  if (asset.kind === "erc20") return asset.symbol;
+  return `${asset.collectionName ?? asset.name ?? "NFT"} #${asset.tokenId.toString()}`;
+}
+
+function migrationFailureReason(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  const decodedReasons = [...text.matchAll(/\('([^']+)'\)/g)];
+  const decoded = decodedReasons.at(-1)?.[1];
+  if (decoded) return decoded;
+  if (/not transferable|not be transferable|soulbound/i.test(text)) {
+    return "the contract marks this token as non-transferable";
+  }
+  return "the contract rejected this transfer during simulation";
+}
+
+function isAssetContractFailure(error: unknown, item: MigrationItem): boolean {
+  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (/not transferable|not be transferable|soulbound/i.test(text)) return true;
+
+  const marker = text.lastIndexOf("transaction execution error");
+  if (marker < 0) return false;
+  const executionError = text.slice(marker);
+  try {
+    const address = BigInt(item.asset.address).toString(16);
+    return executionError.includes(address);
+  } catch {
+    return false;
+  }
 }
 
 export default function App() {
@@ -183,16 +216,22 @@ export default function App() {
   const [mStatus, setMStatus] = useState<MigrateStatus>("idle");
   const [feeText, setFeeText] = useState<string>();
   const [mError, setMError] = useState<string>();
+  const [mNotice, setMNotice] = useState<string>();
+  const [migrationBlockers, setMigrationBlockers] = useState<Record<string, string>>({});
   const [txs, setTxs] = useState<TxState[]>([]);
 
   const allAssets: Asset[] = useMemo(() => [...erc20s, ...nfts], [erc20s, nfts]);
-  const allErc20sSelected = erc20s.length > 0 && erc20s.every((asset) => selected[asset.id]);
+  const selectableErc20s = erc20s.filter((asset) => !migrationBlockers[asset.id]);
+  const selectableNfts = nfts.filter((asset) => !migrationBlockers[asset.id]);
+  const allErc20sSelected =
+    selectableErc20s.length > 0 && selectableErc20s.every((asset) => selected[asset.id]);
   const hasSelectedErc20s = erc20s.some((asset) => selected[asset.id]);
   const hasSelectedLowOrUnpricedErc20s = erc20s.some((asset) => {
     const value = tokenValueUsd(asset, asset.balance);
     return selected[asset.id] && (value === undefined || value < 1);
   });
-  const allNftsSelected = nfts.length > 0 && nfts.every((asset) => selected[asset.id]);
+  const allNftsSelected =
+    selectableNfts.length > 0 && selectableNfts.every((asset) => selected[asset.id]);
   const hasSelectedNfts = nfts.some((asset) => selected[asset.id]);
   const chainOk = sender ? isOnTargetChain(sender.chainId) : true;
   const sortedErc20s = useMemo(
@@ -231,7 +270,7 @@ export default function App() {
   const selectedItems: MigrationItem[] = useMemo(() => {
     const items: MigrationItem[] = [];
     for (const a of allAssets) {
-      if (!selected[a.id]) continue;
+      if (!selected[a.id] || migrationBlockers[a.id]) continue;
       const raw = amounts[a.id] ?? defaultAmountInput(a);
       try {
         if (a.kind === "erc20") {
@@ -250,7 +289,7 @@ export default function App() {
       }
     }
     return items;
-  }, [allAssets, selected, amounts]);
+  }, [allAssets, selected, amounts, migrationBlockers]);
 
   const selectedErc20Items = useMemo(
     () =>
@@ -329,6 +368,9 @@ export default function App() {
     setTxs([]);
     setMStatus("idle");
     setFeeText(undefined);
+    setMError(undefined);
+    setMNotice(undefined);
+    setMigrationBlockers({});
     setStep(0);
   }
 
@@ -485,6 +527,8 @@ export default function App() {
     setScanning(true);
     setNftNotice(undefined);
     setTokenNotice(undefined);
+    setMigrationBlockers({});
+    setMNotice(undefined);
     try {
       const provider = makeProvider();
       const [tokenRes, nftRes] = await Promise.all([
@@ -562,40 +606,130 @@ export default function App() {
     if (!sender || !recipient) return;
     setMStatus("estimating");
     setMError(undefined);
+    setMNotice(undefined);
     setFeeText(undefined);
+    const items = selectedItems;
     try {
-      const calls = buildCalls(selectedItems, sender.address, recipient);
+      const calls = buildCalls(items, sender.address, recipient);
       if (calls.length === 0) {
         setMError("No assets selected.");
         setMStatus("idle");
         return;
       }
       const est = await estimateFee(sender.account, calls);
-      const overall = (est as any).overall_fee ?? (est as any).suggestedMaxFee;
-      const unit = (est as any).unit;
-      const tokenLabel = unit === "WEI" ? "ETH" : unit === "FRI" ? "STRK" : "";
-      if (overall != null) {
-        setFeeText(`${formatUnits(BigInt(overall), 18)} ${tokenLabel}`.trim());
-      } else {
-        setFeeText("estimated");
-      }
+      showFeeEstimate(est);
       setMStatus("estimated");
-    } catch (e: any) {
+    } catch (error) {
+      const failures = await blockRejectedMigrationItems(items, error);
+      if (failures.length > 0) {
+        const failedIds = new Set(failures.map((failure) => failure.item.asset.id));
+        const remaining = items.filter((item) => !failedIds.has(item.asset.id));
+        if (remaining.length === 0) {
+          setMError("No selected transfers can be migrated.");
+          setMStatus("error");
+          return;
+        }
+        try {
+          const est = await estimateFee(
+            sender.account,
+            buildCalls(remaining, sender.address, recipient)
+          );
+          showFeeEstimate(est);
+          setMStatus("estimated");
+          return;
+        } catch (remainingError) {
+          setMError(`Fee estimate still failed: ${errorMessage(remainingError)}`);
+          setMStatus("error");
+          return;
+        }
+      }
       setMError(
-        `Fee estimate failed: ${e?.message ?? e}. If you are sending most of your ETH/STRK, keep more of the gas token and try again.`
+        `Fee estimate failed: ${errorMessage(error)}. If you are sending most of your ETH/STRK, keep more of the gas token and try again.`
       );
       setMStatus("error");
     }
+  }
+
+  function showFeeEstimate(est: any) {
+    const overall = est?.overall_fee ?? est?.suggestedMaxFee;
+    const unit = est?.unit;
+    const tokenLabel = unit === "WEI" ? "ETH" : unit === "FRI" ? "STRK" : "";
+    setFeeText(
+      overall != null ? `${formatUnits(BigInt(overall), 18)} ${tokenLabel}`.trim() : "estimated"
+    );
+  }
+
+  function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function blockRejectedMigrationItems(
+    items: MigrationItem[],
+    initialError: unknown
+  ): Promise<Awaited<ReturnType<typeof findFailingMigrationItems>>> {
+    if (!sender || !recipient) return [];
+    const diagnosed = await findFailingMigrationItems(
+      sender.account,
+      items,
+      sender.address,
+      recipient,
+      initialError
+    );
+    const failures = diagnosed.filter((failure) =>
+      isAssetContractFailure(failure.error, failure.item)
+    );
+    if (failures.length === 0) return [];
+
+    setMigrationBlockers((current) => {
+      const next = { ...current };
+      for (const failure of failures) {
+        next[failure.item.asset.id] = migrationFailureReason(failure.error);
+      }
+      return next;
+    });
+    setSelected((current) => {
+      const next = { ...current };
+      for (const failure of failures) next[failure.item.asset.id] = false;
+      return next;
+    });
+
+    const details = failures
+      .slice(0, 3)
+      .map(
+        (failure) =>
+          `${migrationItemLabel(failure.item)} (${migrationFailureReason(failure.error)})`
+      );
+    if (failures.length > 3) details.push(`${failures.length - 3} more`);
+    setMNotice(
+      `${failures.length} rejected transfer${failures.length === 1 ? " was" : "s were"} deselected: ${details.join("; ")}.`
+    );
+    return failures;
   }
 
   async function handleMigrate() {
     if (!sender || !recipient) return;
     setMStatus("executing");
     setMError(undefined);
+    setMNotice(undefined);
     setTxs([]);
     const provider = makeProvider();
+    const items = selectedItems;
     try {
-      const calls = buildCalls(selectedItems, sender.address, recipient);
+      const calls = buildCalls(items, sender.address, recipient);
+      const itemBatches = chunk(items, MAX_CALLS_PER_TX);
+      for (const itemBatch of itemBatches) {
+        try {
+          await estimateFee(sender.account, buildCalls(itemBatch, sender.address, recipient));
+        } catch (error) {
+          const failures = await blockRejectedMigrationItems(itemBatch, error);
+          if (failures.length > 0) {
+            setMError("Review the updated selection, then click Migrate again.");
+            setMStatus("error");
+            return;
+          }
+          throw error;
+        }
+      }
       const batches = chunk(calls, MAX_CALLS_PER_TX);
       for (let i = 0; i < batches.length; i++) {
         const { transactionHash } = await executeCalls(sender.account, batches[i]);
@@ -628,12 +762,15 @@ export default function App() {
   }
 
   function toggle(id: string) {
+    if (migrationBlockers[id]) return;
     setSelected((s) => ({ ...s, [id]: !s[id] }));
   }
   function setAssetsSelected(assets: Asset[], value: boolean) {
     setSelected((s) => {
       const next = { ...s };
-      for (const asset of assets) next[asset.id] = value;
+      for (const asset of assets) {
+        next[asset.id] = value && !migrationBlockers[asset.id];
+      }
       return next;
     });
   }
@@ -733,6 +870,8 @@ export default function App() {
                 onChange={(e) => {
                   setRecipientInput(e.target.value);
                   setProof({ status: "none" });
+                  setMigrationBlockers({});
+                  setMNotice(undefined);
                   setReceiverUndeployed(false);
                   setDeployFund({ status: "idle" });
                   setDeployTx({ status: "idle" });
@@ -920,7 +1059,7 @@ export default function App() {
                     <button
                       className="btn ghost"
                       onClick={() => setAssetsSelected(erc20s, true)}
-                      disabled={scanning || allErc20sSelected}
+                      disabled={scanning || selectableErc20s.length === 0 || allErc20sSelected}
                     >
                       Select all
                     </button>
@@ -948,10 +1087,12 @@ export default function App() {
                         type="checkbox"
                         checked={!!selected[a.id]}
                         onChange={() => toggle(a.id)}
+                        disabled={!!migrationBlockers[a.id]}
                       />
                       <div className="asset-main">
                         <strong>{a.symbol}</strong> <span className="muted">{a.name}</span>
                         {a.isGasToken && <span className="tag">gas token</span>}
+                        {migrationBlockers[a.id] && <span className="tag bad">cannot migrate</span>}
                         <div className="muted small">
                           Balance: {formatUnits(a.balance, a.decimals)}
                           {priceOf(a) !== undefined && <> · {formatUsd(priceOf(a)!)}/ea</>}
@@ -959,6 +1100,9 @@ export default function App() {
                             <> · ≈ {formatUsd(tokenValueUsd(a, a.balance)!)}</>
                           )}
                         </div>
+                        {migrationBlockers[a.id] && (
+                          <div className="error">{migrationBlockers[a.id]}</div>
+                        )}
                       </div>
                       <div className="asset-amt">
                         <input
@@ -991,7 +1135,7 @@ export default function App() {
                     <button
                       className="btn ghost"
                       onClick={() => setAssetsSelected(nfts, true)}
-                      disabled={scanning || allNftsSelected}
+                      disabled={scanning || selectableNfts.length === 0 || allNftsSelected}
                     >
                       Select all
                     </button>
@@ -1006,17 +1150,26 @@ export default function App() {
                 </div>
                 <div className="nft-collections">
                   {nftCollections.map((collection) => {
-                    const selectedCount = collection.assets.filter(
+                    const selectableAssets = collection.assets.filter(
+                      (asset) => !migrationBlockers[asset.id]
+                    );
+                    const selectedCount = selectableAssets.filter(
                       (asset) => selected[asset.id]
                     ).length;
-                    const collectionSelected = selectedCount === collection.assets.length;
+                    const unavailableCount = collection.assets.length - selectableAssets.length;
+                    const collectionSelected =
+                      selectableAssets.length > 0 && selectedCount === selectableAssets.length;
                     return (
                       <section className="nft-collection" key={collection.address}>
                         <div className="nft-collection-head">
                           <div>
                             <strong>{collection.name}</strong>
                             <div className="muted small">
-                              {selectedCount} of {collection.assets.length} selected ·{" "}
+                              {selectedCount} of {selectableAssets.length} selectable selected
+                              {unavailableCount > 0
+                                ? ` · ${unavailableCount} cannot be migrated`
+                                : ""}{" "}
+                              ·{" "}
                               <a
                                 href={EXPLORER_CONTRACT(collection.address)}
                                 target="_blank"
@@ -1031,7 +1184,7 @@ export default function App() {
                             onClick={() =>
                               setAssetsSelected(collection.assets, !collectionSelected)
                             }
-                            disabled={scanning}
+                            disabled={scanning || selectableAssets.length === 0}
                           >
                             {collectionSelected ? "Deselect collection" : "Select collection"}
                           </button>
@@ -1044,8 +1197,9 @@ export default function App() {
                                   type="checkbox"
                                   checked={!!selected[a.id]}
                                   onChange={() => toggle(a.id)}
+                                  disabled={!!migrationBlockers[a.id]}
                                 />
-                                <span>Include</span>
+                                <span>{migrationBlockers[a.id] ? "Unavailable" : "Include"}</span>
                               </label>
                               {a.imageUrl ? (
                                 <img className="nft-thumb" src={a.imageUrl} alt="" />
@@ -1054,11 +1208,17 @@ export default function App() {
                               )}
                               <div className="asset-main">
                                 <strong>#{a.tokenId.toString()}</strong>
+                                {migrationBlockers[a.id] && (
+                                  <span className="tag bad">cannot migrate</span>
+                                )}
                                 <div className="muted small">
                                   {a.kind === "erc1155"
                                     ? `ERC-1155 · owned: ${a.balance}`
                                     : "ERC-721"}
                                 </div>
+                                {migrationBlockers[a.id] && (
+                                  <div className="error">{migrationBlockers[a.id]}</div>
+                                )}
                               </div>
                               {a.kind === "erc1155" && (
                                 <div className="asset-amt">
@@ -1294,6 +1454,7 @@ export default function App() {
               {feeText && <span className="muted">Estimated fee: ~{feeText}</span>}
             </div>
 
+            {mNotice && <p className="notice">{mNotice}</p>}
             {mError && <p className="error">{mError}</p>}
 
             <div className="banner warn small">

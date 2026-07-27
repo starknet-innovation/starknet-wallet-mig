@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { buildCall, buildCalls, buildOwnershipChallenge, chunk, randomNonce } from "./migrate";
+import type { AccountInterface } from "starknet";
+import { describe, expect, it, vi } from "vitest";
+import {
+  buildCall,
+  buildCalls,
+  buildOwnershipChallenge,
+  chunk,
+  findFailingMigrationItems,
+  randomNonce,
+} from "./migrate";
 import type { Erc20Asset, NftAsset } from "./types";
 
 const sampleErc20: Erc20Asset = {
@@ -64,6 +72,32 @@ describe("buildCall / buildCalls", () => {
       "0xto"
     );
     expect(calls).toHaveLength(2);
+  });
+
+  it("isolates a rejected transfer without testing every item individually", async () => {
+    const goodA = { ...sampleErc20, id: "good-a", address: "0x1" };
+    const bad = { ...sampleErc20, id: "bad", address: "0x2" };
+    const goodB = { ...sampleErc20, id: "good-b", address: "0x3" };
+    const estimateInvokeFee = vi.fn(async (calls: { contractAddress: string }[]) => {
+      if (calls.some((call) => call.contractAddress === bad.address)) {
+        throw new Error("token can not be transferable");
+      }
+      return {};
+    });
+    const account = { estimateInvokeFee } as unknown as AccountInterface;
+    const items = [goodA, bad, goodB].map((asset) => ({ asset, amount: 1n }));
+
+    const failures = await findFailingMigrationItems(
+      account,
+      items,
+      "0xfrom",
+      "0xto",
+      new Error("multicall failed")
+    );
+
+    expect(failures.map((failure) => failure.item.asset.id)).toEqual(["bad"]);
+    expect(String(failures[0].error)).toContain("not be transferable");
+    expect(estimateInvokeFee).toHaveBeenCalledTimes(4);
   });
 });
 

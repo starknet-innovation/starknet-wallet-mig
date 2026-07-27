@@ -66,6 +66,52 @@ export async function estimateFee(account: AccountInterface, calls: Call[]) {
   return account.estimateInvokeFee(calls);
 }
 
+export interface MigrationItemFailure {
+  item: MigrationItem;
+  error: unknown;
+}
+
+/**
+ * Isolate individually failing transfers after a multicall simulation fails.
+ *
+ * Successful halves are discarded; failing halves are bisected until the
+ * rejected item(s) are known. This takes O(log n) estimates for one bad item
+ * instead of estimating every transfer separately.
+ */
+export async function findFailingMigrationItems(
+  account: AccountInterface,
+  items: MigrationItem[],
+  from: string,
+  to: string,
+  initialError?: unknown
+): Promise<MigrationItemFailure[]> {
+  const failures: MigrationItemFailure[] = [];
+
+  async function inspect(group: MigrationItem[], knownError?: unknown): Promise<void> {
+    let error = knownError;
+    if (error === undefined) {
+      try {
+        await estimateFee(account, buildCalls(group, from, to));
+        return;
+      } catch (caught) {
+        error = caught;
+      }
+    }
+
+    if (group.length === 1) {
+      failures.push({ item: group[0], error });
+      return;
+    }
+
+    const middle = Math.ceil(group.length / 2);
+    await inspect(group.slice(0, middle));
+    await inspect(group.slice(middle));
+  }
+
+  if (items.length > 0) await inspect(items, initialError);
+  return failures;
+}
+
 export interface ExecResult {
   transactionHash: string;
 }

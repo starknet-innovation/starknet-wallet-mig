@@ -53,6 +53,9 @@ multicall). Mainnet only.
 4. **Review & migrate** — all selected transfers are batched into one multicall
    (chunked into several transactions if there are many), with a fee estimate.
    For ETH/STRK the default keeps a small gas buffer so you can still pay fees.
+   Before signing, the app simulates the migration. If a contract rejects an
+   individual transfer (for example, a soulbound NFT), the app isolates and
+   deselects that asset so it cannot block the remaining migration.
 
 What it does **not** do: unwind DeFi/staking/LP positions or vesting. Those
 aren't simple transfers and must be handled in their own protocols first.
