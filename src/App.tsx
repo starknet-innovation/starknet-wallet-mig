@@ -397,7 +397,7 @@ export default function App() {
         nonce: randomNonce(),
       });
       const signature = await w.account.signMessage(typedData);
-      const ok = await verifyOwnership(w.account, typedData, signature, recipient);
+      const ok = await verifyOwnership(makeProvider(), typedData, signature, recipient);
       if (ok) {
         setProof({ status: "verified", signer: w.address });
         return;
@@ -459,10 +459,10 @@ export default function App() {
         return;
       }
       const call = erc20TransferCall(STRK.address, recipient, amount);
-      const res = await w.account.execute(call);
-      setDeployFund({ status: "submitted", hash: res.transaction_hash });
-      await makeProvider().waitForTransaction(res.transaction_hash);
-      setDeployFund({ status: "funded", hash: res.transaction_hash });
+      const { transactionHash } = await executeCalls(w.account, [call]);
+      setDeployFund({ status: "submitted", hash: transactionHash });
+      await makeProvider().waitForTransaction(transactionHash);
+      setDeployFund({ status: "funded", hash: transactionHash });
     } catch (e: any) {
       setDeployFund({
         status: "error",
@@ -498,14 +498,14 @@ export default function App() {
         return;
       }
       const call = erc20TransferCall(STRK.address, recipient, 0n);
-      const res = await w.account.execute(call);
-      setDeployTx({ status: "submitted", hash: res.transaction_hash });
-      await provider.waitForTransaction(res.transaction_hash);
+      const { transactionHash } = await executeCalls(w.account, [call]);
+      setDeployTx({ status: "submitted", hash: transactionHash });
+      await provider.waitForTransaction(transactionHash);
       const nowDeployed = await isDeployed(provider, recipient);
       setReceiverUndeployed(!nowDeployed);
       setDeployTx(
         nowDeployed
-          ? { status: "deployed", hash: res.transaction_hash }
+          ? { status: "deployed", hash: transactionHash }
           : {
               status: "error",
               error:

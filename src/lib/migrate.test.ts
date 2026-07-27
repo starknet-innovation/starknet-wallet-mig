@@ -5,6 +5,8 @@ import {
   buildCalls,
   buildOwnershipChallenge,
   chunk,
+  estimateFee,
+  executeCalls,
   findFailingMigrationItems,
   randomNonce,
 } from "./migrate";
@@ -98,6 +100,29 @@ describe("buildCall / buildCalls", () => {
     expect(failures.map((failure) => failure.item.asset.id)).toEqual(["bad"]);
     expect(String(failures[0].error)).toContain("not be transferable");
     expect(estimateInvokeFee).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("transaction fees", () => {
+  it("estimates with an explicit zero tip", async () => {
+    const estimateInvokeFee = vi.fn().mockResolvedValue({ overall_fee: 1n });
+    const account = { estimateInvokeFee } as unknown as AccountInterface;
+    const calls = buildCalls([{ asset: sampleErc20, amount: 1n }], "0xfrom", "0xto");
+
+    await estimateFee(account, calls);
+
+    expect(estimateInvokeFee).toHaveBeenCalledWith(calls, { tip: 0n });
+  });
+
+  it("executes with an explicit zero tip", async () => {
+    const execute = vi.fn().mockResolvedValue({ transaction_hash: "0x123" });
+    const account = { execute } as unknown as AccountInterface;
+    const calls = buildCalls([{ asset: sampleErc20, amount: 1n }], "0xfrom", "0xto");
+
+    await expect(executeCalls(account, calls)).resolves.toEqual({
+      transactionHash: "0x123",
+    });
+    expect(execute).toHaveBeenCalledWith(calls, { tip: 0n });
   });
 });
 

@@ -2,6 +2,7 @@ import {
   type AccountInterface,
   type Call,
   CallData,
+  type ProviderInterface,
   type Signature,
   type TypedData,
   cairo,
@@ -63,7 +64,9 @@ export function chunk<T>(arr: T[], size = MAX_CALLS_PER_TX): T[][] {
 }
 
 export async function estimateFee(account: AccountInterface, calls: Call[]) {
-  return account.estimateInvokeFee(calls);
+  // A zero tip is valid on Starknet and avoids sampling recent blocks. Public
+  // RPCs can otherwise fail when fewer than 10 tipped V3 transactions exist.
+  return account.estimateInvokeFee(calls, { tip: 0n });
 }
 
 export interface MigrationItemFailure {
@@ -117,7 +120,7 @@ export interface ExecResult {
 }
 
 export async function executeCalls(account: AccountInterface, calls: Call[]): Promise<ExecResult> {
-  const res = await account.execute(calls);
+  const res = await account.execute(calls, { tip: 0n });
   return { transactionHash: res.transaction_hash };
 }
 
@@ -175,13 +178,13 @@ export function buildOwnershipChallenge(opts: {
 
 /** Verify a typed-data signature on-chain against the receiver's account. */
 export async function verifyOwnership(
-  account: AccountInterface,
+  provider: ProviderInterface,
   typedData: TypedData,
   signature: Signature,
   receiver: string
 ): Promise<boolean> {
   try {
-    return await account.verifyMessageInStarknet(typedData, signature, receiver);
+    return await provider.verifyMessageInStarknet(typedData, signature, receiver);
   } catch {
     return false;
   }

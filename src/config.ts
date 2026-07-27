@@ -9,7 +9,8 @@ export const CHAIN_LABEL = "Starknet Mainnet";
 
 /**
  * Default public RPC endpoint (CORS-open, no key). Users can override it in
- * Settings. starknet.js 8.x speaks JSON-RPC 0.8, hence the `/v0_8` suffix.
+ * Settings. The configured public endpoints support the RPC version used by
+ * starknet.js.
  */
 export const DEFAULT_RPC_URL = "https://api.cartridge.gg/x/starknet/mainnet";
 

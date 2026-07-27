@@ -16,10 +16,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@starknet-io/get-starknet": "4.0.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "starknet": "8.9.2",
-    "starknetkit": "3.4.3"
+    "starknet": "10.0.2"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

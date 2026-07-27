@@ -11,7 +11,7 @@ multicall). Mainnet only.
 
 ## What it does
 
-1. **Connect the sending wallet** via [starknetkit](https://github.com/argentlabs/starknetkit)
+1. **Connect the sending wallet** via [get-starknet](https://github.com/starknet-io/get-starknet)
    (ArgentX / Ready, Braavos, web wallet, …). Your keys never leave your wallet —
    the app only ever asks your wallet to sign.
 2. **Set the receiving wallet** by pasting its address, with an **optional
@@ -113,7 +113,7 @@ sub-path without extra configuration.
 ## Tech
 
 React + Vite + TypeScript · [starknet.js](https://github.com/starknet-io/starknet.js)
-`8.9.2` · starknetkit `3.4.3`.
+`10.0.2` · get-starknet `4.0.8`.
 
 ## Adding tokens
 

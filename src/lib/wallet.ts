@@ -1,6 +1,6 @@
-import type { AccountInterface } from "starknet";
-import { connect, disconnect } from "starknetkit";
-import { CHAIN_ID, DAPP_NAME } from "../config";
+import { connect, disconnect } from "@starknet-io/get-starknet";
+import { type AccountInterface, WalletAccount } from "starknet";
+import { CHAIN_ID } from "../config";
 import { makeProvider } from "./provider";
 
 export interface WalletConnection {
@@ -14,18 +14,21 @@ export interface WalletConnection {
 export async function connectWallet(
   modalMode: "alwaysAsk" | "canAsk" = "alwaysAsk"
 ): Promise<WalletConnection | null> {
-  const { connector, connectorData } = await connect({
+  const wallet = await connect({
     modalMode,
-    dappName: DAPP_NAME,
     modalTheme: "dark",
   });
-  if (!connector || !connectorData?.account) return null;
-  const account = await connector.account(makeProvider());
+  if (!wallet) return null;
+
+  // get-starknet already requested access; reconnect silently to wrap the
+  // selected wallet in the starknet.js v10 AccountInterface.
+  const account = await WalletAccount.connect(makeProvider(), wallet, undefined, undefined, true);
+  const chainId = await wallet.request({ type: "wallet_requestChainId" });
   return {
-    address: connectorData.account,
-    chainId: connectorData.chainId,
+    address: account.address,
+    chainId: BigInt(chainId),
     account,
-    walletName: connector.name ?? "Wallet",
+    walletName: wallet.name ?? "Wallet",
   };
 }
 
