@@ -8,6 +8,7 @@ import {
   estimateFee,
   executeCalls,
   findFailingMigrationItems,
+  findFailingNftMigrationItems,
   randomNonce,
 } from "./migrate";
 import type { Erc20Asset, NftAsset } from "./types";
@@ -100,6 +101,28 @@ describe("buildCall / buildCalls", () => {
     expect(failures.map((failure) => failure.item.asset.id)).toEqual(["bad"]);
     expect(String(failures[0].error)).toContain("not be transferable");
     expect(estimateInvokeFee).toHaveBeenCalledTimes(4);
+  });
+
+  it("isolates a non-transferable NFT before it is selected", async () => {
+    const good = { ...sampleNft, id: "good", address: "0x1", tokenId: 1n };
+    const soulbound = { ...sampleNft, id: "soulbound", address: "0x2", tokenId: 2n };
+    const estimateInvokeFee = vi.fn(async (calls: { contractAddress: string }[]) => {
+      if (calls.some((call) => call.contractAddress === soulbound.address)) {
+        throw new Error("NFT is soulbound and not transferable");
+      }
+      return {};
+    });
+    const account = { estimateInvokeFee } as unknown as AccountInterface;
+
+    const failures = await findFailingNftMigrationItems(
+      account,
+      [good, soulbound],
+      "0xfrom",
+      "0xto"
+    );
+
+    expect(failures.map((failure) => failure.item.asset.id)).toEqual(["soulbound"]);
+    expect(String(failures[0].error)).toContain("soulbound");
   });
 });
 

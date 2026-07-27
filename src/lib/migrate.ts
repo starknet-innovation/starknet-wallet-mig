@@ -9,7 +9,7 @@ import {
 } from "starknet";
 import { CHAIN_ID, DAPP_NAME, MAX_CALLS_PER_TX } from "../config";
 import { defaultNftTransferEntrypoint } from "./nftEntrypoint";
-import type { Asset } from "./types";
+import type { Asset, NftAsset } from "./types";
 
 export interface MigrationItem {
   asset: Asset;
@@ -112,6 +112,37 @@ export async function findFailingMigrationItems(
   }
 
   if (items.length > 0) await inspect(items, initialError);
+  return failures;
+}
+
+/**
+ * Simulate the discovered NFTs before they are offered for migration. A single
+ * rejected batch is bisected to identify the specific NFT(s) that cannot move.
+ * ERC-1155 checks use one unit: transferability is a property of the token,
+ * while the user can still choose a smaller migration amount in the UI.
+ */
+export async function findFailingNftMigrationItems(
+  account: AccountInterface,
+  assets: NftAsset[],
+  from: string,
+  to: string
+): Promise<MigrationItemFailure[]> {
+  const items = assets.map((asset) => ({ asset, amount: 1n }));
+  const failures: MigrationItemFailure[] = [];
+
+  for (const itemBatch of chunk(items)) {
+    try {
+      await estimateFee(account, buildCalls(itemBatch, from, to));
+    } catch (initialError) {
+      const diagnosed = await findFailingMigrationItems(account, itemBatch, from, to, initialError);
+      // A whole multicall can fail even though its individual transfers pass.
+      // Do not report that batch as transferable: the caller must surface the
+      // original error instead of allowing an unsafe selection.
+      if (diagnosed.length === 0) throw initialError;
+      failures.push(...diagnosed);
+    }
+  }
+
   return failures;
 }
 

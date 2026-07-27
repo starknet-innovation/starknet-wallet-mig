@@ -35,10 +35,12 @@ multicall). Mainnet only.
      Collections whose IDs cannot be resolved remain available for a manual,
      on-chain-verified add. A custom NFT-holdings URL in Settings can override
      the Worker with another indexer.
-   - **NFT transfer compatibility** — the app reads each selected collection's
-     deployed ABI and calls the transfer function it actually exposes. This
-     supports both current Cairo `transfer_from` / `safe_transfer_from` and
-     older camelCase `transferFrom` / `safeTransferFrom` collections.
+   - **NFT transfer compatibility** — before any NFT can be selected, the app
+     simulates its transfer to the chosen recipient and disables each rejected
+     item (for example, a soulbound NFT). It reads the collection's deployed
+     ABI and calls the transfer function it actually exposes, supporting both
+     current Cairo `transfer_from` / `safe_transfer_from` and older camelCase
+     `transferFrom` / `safeTransferFrom` collections.
    - **Add manually** anything not detected (by contract + token ID).
    - **USD prices** are read **on-chain** from Ekubo's Oracle (the `PriceFetcher`
      contract), quoted against USDC via a TWAP — shown per token and as a
