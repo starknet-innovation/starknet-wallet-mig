@@ -28,7 +28,7 @@ import {
   randomNonce,
   verifyOwnership,
 } from "./lib/migrate";
-import { fetchUsdPrices, priceKey } from "./lib/prices";
+import { fetchUsdPrices, priceKey, tokenUsdValue } from "./lib/prices";
 import { makeProvider } from "./lib/provider";
 import { MAINNET_TOKENS } from "./lib/tokens";
 import type { Asset, Erc20Asset, NftAsset } from "./lib/types";
@@ -167,9 +167,7 @@ export default function App() {
 
   const tokenValueUsd = useCallback(
     (a: Erc20Asset, amountRaw: bigint): number | undefined => {
-      const p = prices.get(priceKey(a.address));
-      if (p === undefined) return undefined;
-      return (Number(amountRaw) / 10 ** a.decimals) * p;
+      return tokenUsdValue(amountRaw, a.decimals, prices.get(priceKey(a.address)));
     },
     [prices]
   );
@@ -190,6 +188,10 @@ export default function App() {
   const allAssets: Asset[] = useMemo(() => [...erc20s, ...nfts], [erc20s, nfts]);
   const allErc20sSelected = erc20s.length > 0 && erc20s.every((asset) => selected[asset.id]);
   const hasSelectedErc20s = erc20s.some((asset) => selected[asset.id]);
+  const hasSelectedSubDollarErc20s = erc20s.some((asset) => {
+    const value = tokenValueUsd(asset, asset.balance);
+    return selected[asset.id] && value !== undefined && value < 1;
+  });
   const allNftsSelected = nfts.length > 0 && nfts.every((asset) => selected[asset.id]);
   const hasSelectedNfts = nfts.some((asset) => selected[asset.id]);
   const chainOk = sender ? isOnTargetChain(sender.chainId) : true;
@@ -611,6 +613,16 @@ export default function App() {
       return next;
     });
   }
+  function deselectSubDollarErc20s() {
+    setSelected((s) => {
+      const next = { ...s };
+      for (const asset of erc20s) {
+        const value = tokenValueUsd(asset, asset.balance);
+        if (value !== undefined && value < 1) next[asset.id] = false;
+      }
+      return next;
+    });
+  }
   function setAmt(id: string, v: string) {
     setAmounts((m) => ({ ...m, [id]: v }));
   }
@@ -894,6 +906,14 @@ export default function App() {
                       disabled={scanning || !hasSelectedErc20s}
                     >
                       Deselect all
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={deselectSubDollarErc20s}
+                      disabled={scanning || !hasSelectedSubDollarErc20s}
+                      title="Deselect priced tokens worth less than $1. Unpriced tokens stay selected."
+                    >
+                      Deselect &lt; $1
                     </button>
                   </div>
                 </div>

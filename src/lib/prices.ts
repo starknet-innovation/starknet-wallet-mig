@@ -43,6 +43,16 @@ export interface PricedToken {
   decimals: number;
 }
 
+/** Return a token balance's USD value when an on-chain price is available. */
+export function tokenUsdValue(
+  balance: bigint,
+  decimals: number,
+  price: number | undefined
+): number | undefined {
+  if (price === undefined) return undefined;
+  return (Number(balance) / 10 ** decimals) * price;
+}
+
 /**
  * Returns a map of `numericAddressKey -> USD price per whole token`. Tokens with
  * no oracle pool (or insufficient history) are simply omitted. Best-effort:
