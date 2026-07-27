@@ -188,6 +188,10 @@ export default function App() {
   const [txs, setTxs] = useState<TxState[]>([]);
 
   const allAssets: Asset[] = useMemo(() => [...erc20s, ...nfts], [erc20s, nfts]);
+  const allErc20sSelected = erc20s.length > 0 && erc20s.every((asset) => selected[asset.id]);
+  const hasSelectedErc20s = erc20s.some((asset) => selected[asset.id]);
+  const allNftsSelected = nfts.length > 0 && nfts.every((asset) => selected[asset.id]);
+  const hasSelectedNfts = nfts.some((asset) => selected[asset.id]);
   const chainOk = sender ? isOnTargetChain(sender.chainId) : true;
 
   const selectedItems: MigrationItem[] = useMemo(() => {
@@ -577,6 +581,13 @@ export default function App() {
   function toggle(id: string) {
     setSelected((s) => ({ ...s, [id]: !s[id] }));
   }
+  function setAssetsSelected(assets: Asset[], value: boolean) {
+    setSelected((s) => {
+      const next = { ...s };
+      for (const asset of assets) next[asset.id] = value;
+      return next;
+    });
+  }
   function setAmt(id: string, v: string) {
     setAmounts((m) => ({ ...m, [id]: v }));
   }
@@ -844,7 +855,25 @@ export default function App() {
 
             {erc20s.length > 0 && (
               <>
-                <h3>Tokens</h3>
+                <div className="asset-section-head">
+                  <h3>Tokens</h3>
+                  <div className="asset-section-actions">
+                    <button
+                      className="btn ghost"
+                      onClick={() => setAssetsSelected(erc20s, true)}
+                      disabled={scanning || allErc20sSelected}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setAssetsSelected(erc20s, false)}
+                      disabled={scanning || !hasSelectedErc20s}
+                    >
+                      Deselect all
+                    </button>
+                  </div>
+                </div>
                 <div className="asset-list">
                   {erc20s.map((a) => (
                     <div className="asset-row" key={a.id}>
@@ -889,7 +918,25 @@ export default function App() {
 
             {nfts.length > 0 && (
               <>
-                <h3>NFTs</h3>
+                <div className="asset-section-head">
+                  <h3>NFTs</h3>
+                  <div className="asset-section-actions">
+                    <button
+                      className="btn ghost"
+                      onClick={() => setAssetsSelected(nfts, true)}
+                      disabled={scanning || allNftsSelected}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setAssetsSelected(nfts, false)}
+                      disabled={scanning || !hasSelectedNfts}
+                    >
+                      Deselect all
+                    </button>
+                  </div>
+                </div>
                 <div className="asset-list">
                   {nfts.map((a) => (
                     <div className="asset-row" key={a.id}>

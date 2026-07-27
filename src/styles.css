@@ -150,6 +150,25 @@ body {
   letter-spacing: 0.05em;
   color: var(--muted);
 }
+.asset-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0 8px;
+  flex-wrap: wrap;
+}
+.card .asset-section-head h3 {
+  margin: 0;
+}
+.asset-section-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.asset-section-actions .btn {
+  margin-top: 0;
+}
 .sub {
   color: var(--muted);
   margin: 0 0 18px;
