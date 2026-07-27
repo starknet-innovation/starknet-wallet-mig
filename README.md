@@ -25,14 +25,20 @@ multicall). Mainnet only.
      on-chain balances** for each token (so a stale indexer snapshot can never
      inflate a transfer). Without a proxy, the app falls back to a built-in
      token list (`src/lib/tokens.ts`) over public RPC — no key, no Worker.
-   - **NFTs** — detected via **plain RPC** over a curated collection list
-     (`src/lib/collections.ts`): `balanceOf(owner)` per collection (cheap,
-     parallel). For ERC-721 **Enumerable** collections it reads the exact token
-     IDs via `tokenOfOwnerByIndex`; for non-enumerable ones (the common case on
-     Starknet) it reports the holding and offers a one-click **manual token-ID**
-     prompt (collection pre-filled, verified on-chain via `ownerOf`). No indexer
-     needed. An optional "custom NFT holdings URL" in Settings can use an
-     external indexer instead.
+   - **NFTs** — with the Worker proxy configured, indexed address activity is
+     used to find candidate ERC-721 and ERC-1155 holdings. Every candidate is
+     verified live on-chain (`ownerOf` for ERC-721; `balanceOf` for ERC-1155)
+     before it can be selected. Without the Worker, the app falls back to a
+     curated collection list (`src/lib/collections.ts`): it reads
+     `balanceOf(owner)` per collection and resolves IDs through Enumerable,
+     collection-specific, or compact sequential-ID views where available.
+     Collections whose IDs cannot be resolved remain available for a manual,
+     on-chain-verified add. A custom NFT-holdings URL in Settings can override
+     the Worker with another indexer.
+   - **NFT transfer compatibility** — the app reads each selected collection's
+     deployed ABI and calls the transfer function it actually exposes. This
+     supports both current Cairo `transfer_from` / `safe_transfer_from` and
+     older camelCase `transferFrom` / `safeTransferFrom` collections.
    - **Add manually** anything not detected (by contract + token ID).
    - **USD prices** are read **on-chain** from Ekubo's Oracle (the `PriceFetcher`
      contract), quoted against USDC via a TWAP — shown per token and as a
@@ -57,8 +63,9 @@ aren't simple transfers and must be handled in their own protocols first.
   app.** All signing happens inside your wallet extension.
 - The receiving-wallet "proof" is a standard `signMessage` flow; the signature is
   verified against the account on-chain.
-- The indexer API key is stored in `localStorage` and sent only to the indexer
-  you configure. It is never committed to the repo or bundled into the build.
+- The app contains no indexer API key. When the Worker is used, its Starkscan
+  key is a Cloudflare secret and is never sent to the browser or bundled into
+  the build.
 
 ## Run locally
 
@@ -76,14 +83,15 @@ npm run preview  # serve the production build
 - **Token-discovery proxy URL** — the deployed Cloudflare Worker (`/worker`).
   Holds the Starkscan key server-side; the browser never sees it. Blank → the
   built-in token list is used instead.
-- **Custom NFT holdings URL** (optional) — Starkscan has no NFT-by-owner
-  endpoint; supply another provider's URL with `{address}` as a placeholder if
-  you have one.
+- **Custom NFT holdings URL** (optional) — overrides Worker-based NFT discovery
+  with another provider. Use `{address}` as the wallet-address placeholder;
+  every returned holding is still verified live on-chain.
 
-> Note: Starknet has no on-chain "list my assets" call, so full token detection
-> uses an indexer (Starkscan) via the Worker proxy. NFT enumeration isn't offered
-> by Starkscan, so NFTs are added manually (verified on-chain). ERC-20 detection
-> still works with no Worker via the built-in list.
+> Note: Starknet has no on-chain "list my assets" call. The Worker provides
+> indexer-backed discovery for all ERC-20 holdings and NFT candidates, while
+> the no-Worker fallback checks only the built-in token and curated NFT
+> collection lists. Anything outside those sources can still be added manually
+> and is verified on-chain.
 
 ## Deploy to GitHub Pages
 
