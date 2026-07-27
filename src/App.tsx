@@ -1070,9 +1070,24 @@ export default function App() {
                 {selectedItems.map((it) => (
                   <tr key={it.asset.id}>
                     <td>
-                      {it.asset.kind === "erc20"
-                        ? it.asset.symbol
-                        : `${it.asset.collectionName ?? "NFT"} #${it.asset.tokenId}`}
+                      {it.asset.kind === "erc20" ? (
+                        it.asset.symbol
+                      ) : (
+                        <div className="review-nft">
+                          {it.asset.imageUrl ? (
+                            <img className="nft-thumb" src={it.asset.imageUrl} alt="" />
+                          ) : (
+                            <div className="nft-thumb placeholder">NFT</div>
+                          )}
+                          <div>
+                            <strong>{it.asset.collectionName ?? it.asset.name ?? "NFT"}</strong>
+                            <div className="muted small">
+                              #{it.asset.tokenId} ·{" "}
+                              {it.asset.kind === "erc1155" ? "ERC-1155" : "ERC-721"}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </td>
                     <td>
                       {it.asset.kind === "erc20"
