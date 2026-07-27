@@ -7,6 +7,7 @@ import {
   cairo,
 } from "starknet";
 import { CHAIN_ID, DAPP_NAME, MAX_CALLS_PER_TX } from "../config";
+import { defaultNftTransferEntrypoint } from "./nftEntrypoint";
 import type { Asset } from "./types";
 
 export interface MigrationItem {
@@ -33,14 +34,14 @@ export function buildCall(item: MigrationItem, from: string, to: string): Call {
   if (a.kind === "erc721") {
     return {
       contractAddress: a.address,
-      entrypoint: "transferFrom",
+      entrypoint: a.transferEntrypoint ?? defaultNftTransferEntrypoint(a.kind),
       calldata: CallData.compile([from, to, cairo.uint256(a.tokenId)]),
     };
   }
   // erc1155
   return {
     contractAddress: a.address,
-    entrypoint: "safeTransferFrom",
+    entrypoint: a.transferEntrypoint ?? defaultNftTransferEntrypoint(a.kind),
     calldata: CallData.compile([
       from,
       to,

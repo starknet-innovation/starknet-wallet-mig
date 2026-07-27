@@ -10,12 +10,19 @@ export interface Erc20Asset {
   source: "list" | "manual";
 }
 
+export type NftTransferEntrypoint =
+  | "transferFrom"
+  | "transfer_from"
+  | "safeTransferFrom"
+  | "safe_transfer_from";
+
 export interface NftAsset {
   kind: "erc721" | "erc1155";
   id: string; // `${address}:${tokenId}`
   address: string;
   tokenId: bigint;
   balance: bigint; // 1 for ERC-721, n for ERC-1155
+  transferEntrypoint: NftTransferEntrypoint;
   name?: string;
   collectionName?: string;
   imageUrl?: string;

@@ -20,6 +20,7 @@ const sampleNft: NftAsset = {
   address: "0x05dbdedc203e92749e2e746e2d40a768d966bd243df04a6b712e222bc040a9af",
   tokenId: 1n,
   balance: 1n,
+  transferEntrypoint: "transfer_from",
   collectionName: "Starknet.id",
   source: "manual",
 };
@@ -32,9 +33,25 @@ describe("buildCall / buildCalls", () => {
     expect((call.calldata ?? []).length).toBeGreaterThan(0);
   });
 
-  it("builds erc721 transferFrom", () => {
+  it("uses the resolved ERC-721 transfer entrypoint", () => {
     const call = buildCall({ asset: sampleNft, amount: 1n }, "0xfrom", "0xto");
-    expect(call.entrypoint).toBe("transferFrom");
+    expect(call.entrypoint).toBe("transfer_from");
+  });
+
+  it("uses the resolved ERC-1155 transfer entrypoint", () => {
+    const call = buildCall(
+      {
+        asset: {
+          ...sampleNft,
+          kind: "erc1155",
+          transferEntrypoint: "safe_transfer_from",
+        },
+        amount: 2n,
+      },
+      "0xfrom",
+      "0xto"
+    );
+    expect(call.entrypoint).toBe("safe_transfer_from");
   });
 
   it("batches via buildCalls", () => {

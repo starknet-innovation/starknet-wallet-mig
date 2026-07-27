@@ -4,6 +4,7 @@ import { MAINNET_NFT_COLLECTIONS, type NftCollectionInfo } from "./collections";
 import { decodeCairoString } from "./decode";
 import { addressesEqual, normalizeAddress, u256FromFelts } from "./format";
 import { getIndexerConfig } from "./indexerConfig";
+import { defaultNftTransferEntrypoint, nftTransferEntrypointFromAbi } from "./nftEntrypoint";
 import { MAINNET_TOKENS } from "./tokens";
 import type { Erc20Asset, NftAsset } from "./types";
 
@@ -271,6 +272,36 @@ async function ownerOf(
   return null;
 }
 
+async function resolveNftTransferEntrypoints(
+  provider: RpcProvider,
+  assets: NftAsset[]
+): Promise<NftAsset[]> {
+  const collections = new Map<string, { address: string; kind: NftAsset["kind"] }>();
+  for (const asset of assets) {
+    collections.set(`${addressKey(asset.address)}:${asset.kind}`, {
+      address: asset.address,
+      kind: asset.kind,
+    });
+  }
+
+  const resolved = new Map<string, NftAsset["transferEntrypoint"]>();
+  await mapLimit([...collections.entries()], 6, async ([key, collection]) => {
+    try {
+      const contractClass = await provider.getClassAt(collection.address);
+      const entrypoint = nftTransferEntrypointFromAbi(contractClass.abi, collection.kind);
+      if (entrypoint) resolved.set(key, entrypoint);
+    } catch {
+      /* Retain the standard snake_case default when an ABI is unavailable. */
+    }
+  });
+
+  return assets.map((asset) => ({
+    ...asset,
+    transferEntrypoint:
+      resolved.get(`${addressKey(asset.address)}:${asset.kind}`) ?? asset.transferEntrypoint,
+  }));
+}
+
 /** Manual NFT add. Verifies ownership via `ownerOf` before returning. */
 export async function lookupNft(
   provider: RpcProvider,
@@ -306,15 +337,17 @@ export async function lookupNft(
   } catch {
     /* optional */
   }
-  return {
+  const asset: NftAsset = {
     kind: "erc721",
     id: `${addr}:${tokenId.toString()}`,
     address: addr,
     tokenId,
     balance: 1n,
+    transferEntrypoint: defaultNftTransferEntrypoint("erc721"),
     collectionName,
     source: "manual",
   };
+  return (await resolveNftTransferEntrypoints(provider, [asset]))[0];
 }
 
 export interface HeldCollection {
@@ -427,6 +460,9 @@ function nftAsset(
     address,
     tokenId,
     balance,
+    transferEntrypoint: defaultNftTransferEntrypoint(
+      col.standard === "erc1155" ? "erc1155" : "erc721"
+    ),
     collectionName: col.name,
     source: "indexer",
   };
@@ -589,7 +625,7 @@ async function scanNftsViaProxy(
     for (const asset of sequential?.assets ?? []) assets.set(asset.id, asset);
   });
 
-  return [...assets.values()];
+  return resolveNftTransferEntrypoints(provider, [...assets.values()]);
 }
 
 /** Plain-RPC NFT scan with automatic ID resolution for curated collections. */
@@ -622,6 +658,7 @@ export async function scanNftsViaRpc(provider: RpcProvider, owner: string): Prom
           address: addr,
           tokenId,
           balance: 1n,
+          transferEntrypoint: defaultNftTransferEntrypoint("erc721"),
           collectionName: col.name,
           source: "indexer",
         });
@@ -654,7 +691,11 @@ export async function scanNftsViaRpc(provider: RpcProvider, owner: string): Prom
   const notice = manualNeeded.some((m) => !m.truncated)
     ? "Automatic lookup could not resolve every NFT in one or more legacy collections. Resolved NFTs are selectable below; the manual form remains available for any missing legacy item."
     : undefined;
-  return { assets, manualNeeded, notice };
+  return {
+    assets: await resolveNftTransferEntrypoints(provider, assets),
+    manualNeeded,
+    notice,
+  };
 }
 
 async function scanNftsViaCustomUrl(provider: RpcProvider, owner: string): Promise<NftScanResult> {
@@ -702,6 +743,7 @@ async function scanNftsViaCustomUrl(provider: RpcProvider, owner: string): Promi
         address: addr,
         tokenId,
         balance: bal,
+        transferEntrypoint: defaultNftTransferEntrypoint(kind),
         name: it.name ?? it.nft_metadata?.name ?? it.metadata?.name,
         collectionName: it.contract?.name ?? it.collection_name ?? it.collection?.name,
         imageUrl:
@@ -718,7 +760,8 @@ async function scanNftsViaCustomUrl(provider: RpcProvider, owner: string): Promi
       const holder = await ownerOf(provider, asset.address, asset.tokenId);
       return holder && addressesEqual(holder, owner) ? { ...asset, balance: 1n } : null;
     });
-    return { assets: verified.filter((asset): asset is NftAsset => asset !== null) };
+    const assets = verified.filter((asset): asset is NftAsset => asset !== null);
+    return { assets: await resolveNftTransferEntrypoints(provider, assets) };
   } catch (e: any) {
     return {
       assets: [],
