@@ -1,7 +1,9 @@
 import { connect, disconnect } from "@starknet-io/get-starknet";
-import { type AccountInterface, WalletAccount } from "starknet";
+import { type AccountInterface, WalletAccount, shortString } from "starknet";
 import { CHAIN_ID } from "../config";
 import { makeProvider } from "./provider";
+
+type ConnectedWallet = NonNullable<Awaited<ReturnType<typeof connect>>>;
 
 export interface WalletConnection {
   address: string;
@@ -25,6 +27,52 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
       }
     );
   });
+}
+
+/**
+ * Normalize a wallet-reported chain id. The spec says 0x-hex, but wallets also
+ * return decimal strings, numbers, or the plain name ("SN_MAIN").
+ */
+export function parseChainId(raw: unknown): bigint | undefined {
+  if (typeof raw === "bigint") return raw;
+  if (typeof raw === "number" && Number.isSafeInteger(raw)) return BigInt(raw);
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim();
+  if (!v) return undefined;
+  if (/^0x[0-9a-f]+$/i.test(v) || /^[0-9]+$/.test(v)) return BigInt(v);
+  if (/^[A-Za-z_][\w-]{0,30}$/.test(v)) return BigInt(shortString.encodeShortString(v));
+  return undefined;
+}
+
+/**
+ * Read the wallet's chain id. It gates migration to the target network, so a
+ * wallet that can't report one fails the connection rather than passing as
+ * "unknown".
+ */
+async function readChainId(wallet: ConnectedWallet, walletName: string): Promise<bigint> {
+  let reason = "no response";
+  try {
+    const raw = await withTimeout(
+      wallet.request({ type: "wallet_requestChainId" }),
+      15_000,
+      "timed out"
+    );
+    const parsed = parseChainId(raw);
+    if (parsed != null) return parsed;
+    reason = `unrecognized value ${JSON.stringify(raw)}`;
+  } catch (e) {
+    reason = e instanceof Error ? e.message : String(e);
+  }
+
+  // Legacy injected wallets (Argent X / Ready) also expose the chain directly.
+  const legacy = wallet as unknown as { chainId?: unknown; provider?: { chainId?: unknown } };
+  const fallback = parseChainId(legacy.chainId) ?? parseChainId(legacy.provider?.chainId);
+  if (fallback != null) return fallback;
+
+  console.warn(`[wallet] ${walletName} chain id unavailable:`, reason, wallet);
+  throw new Error(
+    `${walletName} did not report its network (${reason}). Check the wallet and try again.`
+  );
 }
 
 /** Open the wallet modal and return a connected account, or null if cancelled. */
@@ -56,17 +104,7 @@ export async function connectWallet(
     address,
   });
 
-  // The chain id gates migration to the target network, so a wallet that
-  // can't report it must fail the connection rather than pass as "unknown".
-  let chainId: bigint;
-  try {
-    chainId = BigInt(
-      await withTimeout(wallet.request({ type: "wallet_requestChainId" }), 15_000, "timeout")
-    );
-  } catch {
-    throw new Error(`${walletName} did not report its network. Check the wallet and try again.`);
-  }
-
+  const chainId = await readChainId(wallet, walletName);
   return { address: account.address, chainId, account, walletName };
 }
 
