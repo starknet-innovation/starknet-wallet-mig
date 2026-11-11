@@ -56,18 +56,15 @@ export async function connectWallet(
     address,
   });
 
-  // Chain id is only used for a network warning; don't block on it.
-  let chainId: bigint | undefined;
+  // The chain id gates migration to the target network, so a wallet that
+  // can't report it must fail the connection rather than pass as "unknown".
+  let chainId: bigint;
   try {
     chainId = BigInt(
-      await withTimeout(
-        wallet.request({ type: "wallet_requestChainId" }),
-        10_000,
-        "chainId timeout"
-      )
+      await withTimeout(wallet.request({ type: "wallet_requestChainId" }), 15_000, "timeout")
     );
   } catch {
-    chainId = undefined;
+    throw new Error(`${walletName} did not report its network. Check the wallet and try again.`);
   }
 
   return { address: account.address, chainId, account, walletName };
