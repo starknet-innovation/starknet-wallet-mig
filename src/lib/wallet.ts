@@ -50,18 +50,36 @@ export function parseChainId(raw: unknown): bigint | undefined {
  * "unknown".
  */
 async function readChainId(wallet: ConnectedWallet, walletName: string): Promise<bigint> {
-  let reason = "no response";
-  try {
+  const request = async (): Promise<bigint> => {
     const raw = await withTimeout(
       wallet.request({ type: "wallet_requestChainId" }),
       15_000,
       "timed out"
     );
     const parsed = parseChainId(raw);
-    if (parsed != null) return parsed;
-    reason = `unrecognized value ${JSON.stringify(raw)}`;
+    if (parsed == null) throw new Error(`unrecognized value ${JSON.stringify(raw)}`);
+    return parsed;
+  };
+
+  let reason = "no response";
+  try {
+    return await request();
   } catch (e) {
     reason = e instanceof Error ? e.message : String(e);
+  }
+
+  // Ready X (ex-Argent X) returns accounts from wallet_requestAccounts but
+  // doesn't register the dapp as authorized, so wallet_requestChainId fails
+  // with "Not preauthorized". Its legacy `enable()` completes the authorization
+  // (no extra popup once the user has approved); then retry.
+  const legacyEnable = (wallet as unknown as { enable?: () => Promise<unknown> }).enable;
+  if (typeof legacyEnable === "function") {
+    try {
+      await withTimeout(legacyEnable.call(wallet), 60_000, "enable timed out");
+      return await request();
+    } catch (e) {
+      reason = e instanceof Error ? e.message : String(e);
+    }
   }
 
   // Legacy injected wallets (Argent X / Ready) also expose the chain directly.
