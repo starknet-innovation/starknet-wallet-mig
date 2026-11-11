@@ -61,7 +61,7 @@ async function readChainId(wallet: ConnectedWallet, walletName: string): Promise
     return parsed;
   };
 
-  let reason = "no response";
+  let reason: string;
   try {
     return await request();
   } catch (e) {
