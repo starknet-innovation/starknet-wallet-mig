@@ -36,7 +36,7 @@ export function isRpcTransportError(error: unknown): boolean {
   const text = rawMessage(error);
   return (
     error instanceof TypeError ||
-    /failed to fetch|networkerror|load failed|cors|err_|timed? ?out|status: ?(4|5)\d\d|\b(429|502|503|504)\b/i.test(
+    /failed to fetch|networkerror|load failed|cors|err_|timed? ?out|(?:status(?: code)?|http)[: ]+[45]\d\d\b|\b(429|502|503|504)\b/i.test(
       text
     )
   );

@@ -186,14 +186,19 @@ function joinNotices(...parts: (string | undefined)[]): string | undefined {
 export async function scanErc20(provider: RpcProvider, owner: string): Promise<Erc20ScanResult> {
   const cfg = getIndexerConfig();
   if (cfg.proxyUrl) {
-    let viaProxy: BalanceScan | undefined;
+    // Only a proxy fetch/parse failure falls back to the curated list. Once the
+    // proxy answered, RPC failures while validating balances stay RPC errors.
+    let candidates: Candidate[] | undefined;
     let proxyError: any;
     try {
-      viaProxy = await scanErc20ViaProxy(provider, owner, cfg.proxyUrl);
+      candidates = await fetchProxyCandidates(owner, cfg.proxyUrl);
     } catch (e: any) {
       proxyError = e;
     }
-    if (viaProxy) return { assets: viaProxy.assets, notice: rpcFailureNotice(viaProxy) };
+    if (candidates) {
+      const viaProxy = await scanBalances(provider, owner, candidates);
+      return { assets: viaProxy.assets, notice: rpcFailureNotice(viaProxy) };
+    }
     const fallback = await scanErc20ViaRpc(provider, owner);
     return {
       assets: fallback.assets,
@@ -227,11 +232,7 @@ async function scanErc20ViaRpc(provider: RpcProvider, owner: string): Promise<Ba
  * `token-holdings` items; we use them as the candidate set, merge in curated
  * metadata, then read live balances.
  */
-async function scanErc20ViaProxy(
-  provider: RpcProvider,
-  owner: string,
-  proxyUrl: string
-): Promise<BalanceScan> {
+async function fetchProxyCandidates(owner: string, proxyUrl: string): Promise<Candidate[]> {
   const base = proxyUrl.replace(/\/+$/, "");
   const r = await fetch(`${base}/token-holdings?address=${owner}`, {
     headers: { accept: "application/json" },
@@ -261,7 +262,7 @@ async function scanErc20ViaProxy(
       isGasToken: cur?.isGasToken ?? isGasTokenAddress(addr),
     });
   }
-  return scanBalances(provider, owner, candidates);
+  return candidates;
 }
 
 /** Manual ERC-20 lookup by contract address. Reads symbol/decimals/balance on-chain. */

@@ -639,6 +639,12 @@ export default function App() {
       setSelected(sel);
       setAmounts(amt);
     } catch (e) {
+      // Drop the previous scan so nothing unvalidated can be migrated.
+      setErc20s([]);
+      setNfts([]);
+      setHeldCollections([]);
+      setSelected({});
+      setAmounts({});
       setScanError(`Asset scan failed: ${errorText(e)}`);
     } finally {
       setScanning(false);

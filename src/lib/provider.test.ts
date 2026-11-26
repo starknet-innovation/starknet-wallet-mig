@@ -13,6 +13,9 @@ describe("rpc error helpers", () => {
   it("classifies transport failures", () => {
     expect(isRpcTransportError(new TypeError("Failed to fetch"))).toBe(true);
     expect(isRpcTransportError(new Error("status: 503"))).toBe(true);
+    expect(isRpcTransportError(new Error("Request failed with status code 401"))).toBe(true);
+    expect(isRpcTransportError(new Error("HTTP 403 Forbidden"))).toBe(true);
+    expect(isRpcTransportError(new Error("status code 500"))).toBe(true);
     expect(isRpcTransportError(new Error("Contract not found"))).toBe(false);
   });
 
