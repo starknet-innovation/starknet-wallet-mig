@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRpcError, isContractNotFound, isRpcTransportError } from "./provider";
+import { RpcError, describeRpcError, isContractNotFound, isRpcTransportError } from "./provider";
 
 describe("rpc error helpers", () => {
   it("detects contract-not-found", () => {
@@ -17,11 +17,18 @@ describe("rpc error helpers", () => {
     expect(isRpcTransportError(new Error("HTTP 403 Forbidden"))).toBe(true);
     expect(isRpcTransportError(new Error("status code 500"))).toBe(true);
     expect(isRpcTransportError(new Error("Contract not found"))).toBe(false);
+    expect(isRpcTransportError(new TypeError("signMessage is not a function"))).toBe(false);
+    expect(isRpcTransportError(new RpcError(new TypeError("Failed to fetch"), "https://x"))).toBe(
+      false
+    );
   });
 
   it("names the endpoint in the message", () => {
     const msg = describeRpcError(new TypeError("Failed to fetch"), "https://rpc.example/v0_10");
     expect(msg).toContain("https://rpc.example/v0_10");
     expect(msg).toContain("Settings");
+    const once = new RpcError(new TypeError("Failed to fetch"), "https://rpc.example/v0_10")
+      .message;
+    expect(once.match(/Settings/g)).toHaveLength(1);
   });
 });

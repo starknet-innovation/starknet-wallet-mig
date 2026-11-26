@@ -5,7 +5,7 @@ import { decodeCairoString } from "./decode";
 import { addressesEqual, normalizeAddress, u256FromFelts } from "./format";
 import { getIndexerConfig } from "./indexerConfig";
 import { defaultNftTransferEntrypoint, nftTransferEntrypointFromAbi } from "./nftEntrypoint";
-import { describeRpcError, isContractNotFound, isRpcTransportError } from "./provider";
+import { RpcError, describeRpcError, isContractNotFound, isRpcTransportError } from "./provider";
 import { MAINNET_TOKENS } from "./tokens";
 import type { Erc20Asset, NftAsset } from "./types";
 
@@ -32,7 +32,7 @@ export async function isDeployed(provider: RpcProvider, address: string): Promis
     return !!h && BigInt(h) !== 0n;
   } catch (error) {
     if (isContractNotFound(error)) return false;
-    throw new Error(describeRpcError(error));
+    throw new RpcError(error);
   }
 }
 
@@ -163,7 +163,7 @@ async function scanBalances(
   });
   const assets = results.filter((r): r is Erc20Asset => r !== null);
   if (candidates.length > 0 && rpcFailures === candidates.length) {
-    throw new Error(describeRpcError(firstRpcError));
+    throw new RpcError(firstRpcError);
   }
   return { assets, rpcFailures, firstRpcError };
 }

@@ -31,14 +31,27 @@ export function isContractNotFound(error: unknown): boolean {
   return /contract not found|\b20\b.*contract/i.test(rawMessage(error));
 }
 
-/** True when the request never got a usable answer from the RPC node. */
+/**
+ * An RPC failure whose message is already user-facing (from describeRpcError).
+ * Callers show its message as-is instead of formatting it again.
+ */
+export class RpcError extends Error {
+  constructor(cause: unknown, rpcUrl?: string) {
+    super(describeRpcError(cause, rpcUrl));
+    this.name = "RpcError";
+  }
+}
+
+/**
+ * True when the request never got a usable answer from the RPC node. Matches
+ * known fetch/network/HTTP-status messages only, so unrelated TypeErrors (e.g. a
+ * wallet rejecting a signing call) are not mistaken for RPC failures.
+ */
 export function isRpcTransportError(error: unknown): boolean {
+  if (error instanceof RpcError) return false;
   const text = rawMessage(error);
-  return (
-    error instanceof TypeError ||
-    /failed to fetch|networkerror|load failed|cors|err_|timed? ?out|(?:status(?: code)?|http)[: ]+[45]\d\d\b|\b(429|502|503|504)\b/i.test(
-      text
-    )
+  return /failed to fetch|networkerror|load failed|cors|err_|timed? ?out|(?:status(?: code)?|http)[: ]+[45]\d\d\b|\b(429|502|503|504)\b/i.test(
+    text
   );
 }
 
