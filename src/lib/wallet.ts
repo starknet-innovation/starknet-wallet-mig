@@ -93,26 +93,142 @@ async function readChainId(wallet: ConnectedWallet, walletName: string): Promise
   );
 }
 
-/** Open the wallet modal and return a connected account, or null if cancelled. */
+type InjectedWallet = ConnectedWallet & { request: ConnectedWallet["request"] };
+
+interface AccountsAttempt {
+  wallet: InjectedWallet;
+  accounts?: string[];
+  error?: unknown;
+}
+
+/**
+ * Temporarily wrap `request` on every injected `window.starknet*` wallet to
+ * record the `wallet_requestAccounts` call get-starknet makes while enabling
+ * the chosen wallet. get-starknet's `connect` returns null both when the user
+ * closes the modal and when enabling fails (e.g. Ready X on a fresh install
+ * returns accounts but doesn't report the accounts permission yet), so this is
+ * the only way to tell those apart, and it lets us reuse the accounts instead
+ * of asking the wallet a second time (which opens a second popup in Bramble).
+ */
+export function recordAccountRequests(target: Record<string, unknown> = globalThis as never): {
+  attempts: AccountsAttempt[];
+  restore: () => void;
+} {
+  const attempts: AccountsAttempt[] = [];
+  const restores: (() => void)[] = [];
+  const seen = new Set<unknown>();
+  let names: string[] = [];
+  try {
+    names = Object.getOwnPropertyNames(target).filter((n) => n.startsWith("starknet"));
+  } catch {
+    /* no window */
+  }
+  for (const name of names) {
+    let wallet: InjectedWallet | undefined;
+    try {
+      wallet = target[name] as InjectedWallet;
+    } catch {
+      continue;
+    }
+    if (!wallet || typeof wallet.request !== "function" || seen.has(wallet)) continue;
+    seen.add(wallet);
+    const original = wallet.request;
+    const wrapped = (async (call: { type: string }) => {
+      if (call?.type !== "wallet_requestAccounts") {
+        return (original as (c: unknown) => Promise<unknown>).call(wallet, call);
+      }
+      const attempt: AccountsAttempt = { wallet: wallet as InjectedWallet };
+      attempts.push(attempt);
+      try {
+        const res = (await (original as (c: unknown) => Promise<string[]>).call(
+          wallet,
+          call
+        )) as string[];
+        attempt.accounts = res;
+        return res;
+      } catch (e) {
+        attempt.error = e;
+        throw e;
+      }
+    }) as InjectedWallet["request"];
+    try {
+      wallet.request = wrapped;
+      if (wallet.request !== wrapped) continue; // read-only/proxied — skip
+      restores.push(() => {
+        try {
+          wallet.request = original;
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch {
+      /* non-writable — skip this wallet */
+    }
+  }
+  return {
+    attempts,
+    restore: () => {
+      for (const r of restores) r();
+    },
+  };
+}
+
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Open the wallet modal (or, with "canAsk", reuse the last wallet without a
+ * modal) and return a connected account, or null if the user cancelled.
+ */
 export async function connectWallet(
   modalMode: "alwaysAsk" | "canAsk" = "alwaysAsk"
 ): Promise<WalletConnection | null> {
-  const wallet = await connect({
-    modalMode,
-    modalTheme: "dark",
-  });
-  if (!wallet) return null;
+  const probe = recordAccountRequests();
+  let wallet: ConnectedWallet | null;
+  try {
+    wallet = await connect({
+      modalMode,
+      modalTheme: "dark",
+    });
+  } finally {
+    probe.restore();
+  }
+
+  const attempt = probe.attempts.at(-1);
+  if (!wallet) {
+    // No wallet was asked for accounts → the user closed the modal.
+    if (!attempt) return null;
+    const name = attempt.wallet.name ?? "Wallet";
+    // The wallet returned accounts but get-starknet still rejected it (Ready X
+    // on a fresh install doesn't report the accounts permission yet). The
+    // dapp is effectively authorized, so carry on with it; readChainId below
+    // completes Ready's legacy authorization.
+    if (attempt.accounts?.length) {
+      wallet = attempt.wallet;
+    } else {
+      throw new Error(
+        attempt.error
+          ? `${name} didn't connect: ${messageOf(attempt.error)}. Unlock the wallet, approve the connection, and try again.`
+          : `${name} didn't approve the connection. Unlock the wallet, approve the connection, and try again.`
+      );
+    }
+  }
   const walletName = wallet.name ?? "Wallet";
 
-  // get-starknet already authorized the dapp, so a plain (non-silent)
-  // requestAccounts returns the active account immediately. Don't use
-  // `silent_mode: true` (WalletAccount.connect(..., true)): Ready (ex-Argent X)
-  // never answers it, which left the UI stuck on "Connecting…".
-  const accounts = await withTimeout(
-    wallet.request({ type: "wallet_requestAccounts" }),
-    60_000,
-    `${walletName} did not return an account. Unlock the wallet and try again.`
-  );
+  // Reuse the accounts get-starknet already requested while enabling this
+  // wallet; only ask again if they weren't captured (e.g. a virtual wallet).
+  // Don't use `silent_mode: true` (WalletAccount.connect(..., true)): Ready
+  // (ex-Argent X) never answers it, which left the UI stuck on "Connecting…".
+  const captured =
+    attempt && attempt.wallet === wallet && attempt.accounts?.length ? attempt.accounts : undefined;
+  const accounts =
+    captured ??
+    (await withTimeout(
+      wallet.request({ type: "wallet_requestAccounts" }),
+      60_000,
+      `${walletName} did not return an account. Unlock the wallet and try again.`
+    ));
   const address = accounts?.[0];
   if (!address) throw new Error(`${walletName} returned no account.`);
 

@@ -32,3 +32,29 @@ describe("rpc error helpers", () => {
     expect(once.match(/Settings/g)).toHaveLength(1);
   });
 });
+
+describe("rpc url storage", () => {
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
+
+  it("drops a saved former default", async () => {
+    const { getRpcUrl } = await import("./provider");
+    const { DEFAULT_RPC_URL, LS } = await import("../config");
+    store.set(LS.rpcUrl, "https://api.cartridge.gg/x/starknet/mainnet/");
+    expect(getRpcUrl()).toBe(DEFAULT_RPC_URL);
+    expect(store.has(LS.rpcUrl)).toBe(false);
+  });
+
+  it("keeps a real override and doesn't persist the default", async () => {
+    const { getRpcUrl, setRpcUrl } = await import("./provider");
+    const { DEFAULT_RPC_URL, LS } = await import("../config");
+    setRpcUrl("https://my.rpc/v0_10");
+    expect(getRpcUrl()).toBe("https://my.rpc/v0_10");
+    setRpcUrl(DEFAULT_RPC_URL);
+    expect(store.has(LS.rpcUrl)).toBe(false);
+  });
+});
