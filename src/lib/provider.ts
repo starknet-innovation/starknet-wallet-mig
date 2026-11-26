@@ -11,7 +11,11 @@ function normalizeUrl(url: string): string {
  * who once pressed Save follow default changes instead of being pinned to a
  * retired endpoint.
  */
+// Override kept for this page session when browser storage can't persist it.
+let sessionOverride: string | undefined;
+
 export function getRpcUrl(): string {
+  if (sessionOverride !== undefined) return sessionOverride || DEFAULT_RPC_URL;
   let saved: string | null = null;
   try {
     saved = localStorage.getItem(LS.rpcUrl);
@@ -30,17 +34,25 @@ export function getRpcUrl(): string {
   return saved;
 }
 
-/** Save an RPC override. Blank or the default clears it, so future default changes apply. */
-export function setRpcUrl(url: string) {
+/**
+ * Save an RPC override. Blank or the default clears it, so future default
+ * changes apply. Returns false when browser storage is unavailable; the value
+ * then still applies for this page session.
+ */
+export function setRpcUrl(url: string): boolean {
   const value = url.trim();
+  const isDefault = !value || normalizeUrl(value) === normalizeUrl(DEFAULT_RPC_URL);
   try {
-    if (!value || normalizeUrl(value) === normalizeUrl(DEFAULT_RPC_URL)) {
+    if (isDefault) {
       localStorage.removeItem(LS.rpcUrl);
     } else {
       localStorage.setItem(LS.rpcUrl, value);
     }
+    sessionOverride = undefined;
+    return true;
   } catch {
-    /* ignore */
+    sessionOverride = isDefault ? "" : value;
+    return false;
   }
 }
 

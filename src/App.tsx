@@ -523,9 +523,9 @@ export default function App() {
     if (!sender || !recipient) return;
     setDeployFund({ status: "funding" });
     try {
-      // Make sure the wallet's active account is the sender before paying. The
-      // sender's wallet is already connected, so reuse it without the picker.
-      const w = await connectWallet("canAsk");
+      // Make sure the wallet's active account is the sender before paying. Keep
+      // the picker: the receiver may have been connected last from another wallet.
+      const w = await connectWallet("alwaysAsk");
       if (!w) {
         setDeployFund({ status: "idle" });
         return;
@@ -1250,7 +1250,7 @@ export default function App() {
                     <button
                       className="btn ghost"
                       onClick={() => setAssetsSelected(nfts, false)}
-                      disabled={scanning || nftTransfersChecking || !hasSelectedNfts}
+                      disabled={scanning || !hasSelectedNfts}
                     >
                       Deselect all
                     </button>
@@ -1318,9 +1318,9 @@ export default function App() {
                             }
                             disabled={
                               scanning ||
-                              (collectionSelected
-                                ? nftTransfersChecking
-                                : nftTransferCheckPending || selectableAssets.length === 0)
+                              // Deselecting is always allowed; selecting waits for the check.
+                              (!collectionSelected &&
+                                (nftTransferCheckPending || selectableAssets.length === 0))
                             }
                           >
                             {collectionSelected ? "Deselect collection" : "Select collection"}
@@ -1336,7 +1336,6 @@ export default function App() {
                                   onChange={() => toggle(a.id)}
                                   disabled={
                                     !!migrationBlockers[a.id] ||
-                                    nftTransfersChecking ||
                                     // Until the check passes, NFTs can be deselected but not selected.
                                     (nftTransferCheckPending && !selected[a.id])
                                   }

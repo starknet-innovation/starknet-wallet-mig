@@ -58,3 +58,25 @@ describe("rpc url storage", () => {
     expect(store.has(LS.rpcUrl)).toBe(false);
   });
 });
+
+describe("rpc url without storage", () => {
+  it("keeps the override in memory and reports it wasn't persisted", async () => {
+    const saved = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    const { getRpcUrl, setRpcUrl } = await import("./provider");
+    expect(setRpcUrl("https://session.rpc/v0_10")).toBe(false);
+    expect(getRpcUrl()).toBe("https://session.rpc/v0_10");
+    (globalThis as any).localStorage = saved;
+    expect(setRpcUrl("")).toBe(true);
+  });
+});
