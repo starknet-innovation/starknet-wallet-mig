@@ -31,7 +31,7 @@ import {
   verifyOwnership,
 } from "./lib/migrate";
 import { fetchUsdPrices, priceKey, tokenUsdValue } from "./lib/prices";
-import { makeProvider } from "./lib/provider";
+import { describeRpcError, isRpcTransportError, makeProvider } from "./lib/provider";
 import { MAINNET_TOKENS } from "./lib/tokens";
 import type { Asset, Erc20Asset, NftAsset } from "./lib/types";
 import {
@@ -137,6 +137,12 @@ function isAssetContractFailure(error: unknown, item: MigrationItem): boolean {
   }
 }
 
+/** Error text for the UI; RPC/network failures name the endpoint that failed. */
+function errorText(error: unknown): string {
+  if (isRpcTransportError(error)) return describeRpcError(error);
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [step, setStep] = useState(0);
@@ -166,9 +172,11 @@ export default function App() {
         if (cancelled) return;
         setRecipientStatus(deployed ? "deployed" : "undeployed");
         setReceiverUndeployed(!deployed);
-      } catch {
+        setRecipientError(undefined);
+      } catch (e) {
         if (cancelled) return;
         setRecipientStatus("error");
+        setRecipientError(errorText(e));
       }
     }, 450);
     return () => {
@@ -191,6 +199,8 @@ export default function App() {
   const [nfts, setNfts] = useState<NftAsset[]>([]);
   const [nftNotice, setNftNotice] = useState<string>();
   const [tokenNotice, setTokenNotice] = useState<string>();
+  const [scanError, setScanError] = useState<string>();
+  const [recipientError, setRecipientError] = useState<string>();
   const [heldCollections, setHeldCollections] = useState<HeldCollection[]>([]);
   const [manualOpen, setManualOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -499,7 +509,7 @@ export default function App() {
     } catch (e: any) {
       setProof({
         status: "failed",
-        message: e?.message ?? "Could not get a signature.",
+        message: e ? errorText(e) : "Could not get a signature.",
       });
     }
   }
@@ -604,6 +614,7 @@ export default function App() {
     setScanning(true);
     setNftNotice(undefined);
     setTokenNotice(undefined);
+    setScanError(undefined);
     setMigrationBlockers({});
     setNftTransferCheck({ status: "idle" });
     setMNotice(undefined);
@@ -627,6 +638,8 @@ export default function App() {
       }
       setSelected(sel);
       setAmounts(amt);
+    } catch (e) {
+      setScanError(`Asset scan failed: ${errorText(e)}`);
     } finally {
       setScanning(false);
     }
@@ -652,7 +665,7 @@ export default function App() {
       refreshPrices([asset]);
       setManualToken("");
     } catch (e: any) {
-      setManualError(e?.message ?? "Lookup failed.");
+      setManualError(e ? errorText(e) : "Lookup failed.");
     } finally {
       setManualBusy(false);
     }
@@ -674,7 +687,7 @@ export default function App() {
       setManualNftAddr("");
       setManualNftId("");
     } catch (e: any) {
-      setManualError(e?.message ?? "Lookup failed.");
+      setManualError(e ? errorText(e) : "Lookup failed.");
     } finally {
       setManualBusy(false);
     }
@@ -974,8 +987,9 @@ export default function App() {
                 </small>
               )}
               {recipient && recipientStatus === "error" && (
-                <small className="muted">
-                  Couldn’t check deployment status (RPC) — you can still proceed.
+                <small className="warn-text">
+                  Couldn’t check deployment status — you can still proceed.
+                  {recipientError && <> {recipientError}</>}
                 </small>
               )}
               {recipient && sender && addressesEqual(recipient, sender.address) && (
@@ -1128,6 +1142,7 @@ export default function App() {
               </span>
             </div>
 
+            {scanError && <p className="error">{scanError}</p>}
             {tokenNotice && <p className="notice">{tokenNotice}</p>}
 
             {erc20s.length > 0 && (

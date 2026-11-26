@@ -8,13 +8,13 @@ export const CHAIN_ID = constants.StarknetChainId.SN_MAIN;
 export const CHAIN_LABEL = "Starknet Mainnet";
 
 /**
- * Default public RPC endpoint (CORS-open, no key). Users can override it in
- * Settings. The configured public endpoints support the RPC version used by
- * starknet.js.
+ * Default public RPC endpoint (Starknet Foundation node, RPC spec v0_10, no
+ * key). Users can override it in Settings.
  */
-export const DEFAULT_RPC_URL = "https://api.cartridge.gg/x/starknet/mainnet";
+export const DEFAULT_RPC_URL = "https://mainnet.nodes.starknet.org/rpc/v0_10";
 
 export const RPC_ALTERNATIVES = [
+  "https://mainnet.nodes.starknet.org/rpc/v0_10",
   "https://api.cartridge.gg/x/starknet/mainnet",
   "https://free-rpc.nethermind.io/mainnet-juno/v0_8",
   "https://starknet-mainnet.public.blastapi.io/rpc/v0_8",

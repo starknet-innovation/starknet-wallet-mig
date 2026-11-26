@@ -5,6 +5,7 @@ import { decodeCairoString } from "./decode";
 import { addressesEqual, normalizeAddress, u256FromFelts } from "./format";
 import { getIndexerConfig } from "./indexerConfig";
 import { defaultNftTransferEntrypoint, nftTransferEntrypointFromAbi } from "./nftEntrypoint";
+import { describeRpcError, isContractNotFound, isRpcTransportError } from "./provider";
 import { MAINNET_TOKENS } from "./tokens";
 import type { Erc20Asset, NftAsset } from "./types";
 
@@ -20,13 +21,18 @@ function isGasTokenAddress(addr: string): boolean {
   }
 }
 
-/** Whether a contract (account) is deployed on-chain at `address`. */
+/**
+ * Whether a contract (account) is deployed on-chain at `address`. Only a
+ * "contract not found" answer means undeployed; any other RPC failure throws so
+ * callers don't mistake an unreachable node for an undeployed account.
+ */
 export async function isDeployed(provider: RpcProvider, address: string): Promise<boolean> {
   try {
     const h = await provider.getClassHashAt(address);
     return !!h && BigInt(h) !== 0n;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isContractNotFound(error)) return false;
+    throw new Error(describeRpcError(error));
   }
 }
 
@@ -56,7 +62,9 @@ async function readBalance(provider: RpcProvider, token: string, owner: string):
       entrypoint: "balanceOf",
       calldata: [owner],
     });
-  } catch {
+  } catch (error) {
+    // An unreachable node won't answer the snake_case retry either.
+    if (isRpcTransportError(error)) throw error;
     res = await provider.callContract({
       contractAddress: token,
       entrypoint: "balance_of",
@@ -104,11 +112,20 @@ async function enrichMeta(
  * snapshot for amounts) and fill in any missing symbol/decimals. Keeps only
  * tokens with a positive balance.
  */
+interface BalanceScan {
+  assets: Erc20Asset[];
+  /** Candidates skipped because the RPC node could not be reached. */
+  rpcFailures: number;
+  firstRpcError?: unknown;
+}
+
 async function scanBalances(
   provider: RpcProvider,
   owner: string,
   candidates: Candidate[]
-): Promise<Erc20Asset[]> {
+): Promise<BalanceScan> {
+  let rpcFailures = 0;
+  let firstRpcError: unknown;
   const results = await mapLimit(candidates, 8, async (c) => {
     try {
       const balance = await readBalance(provider, c.address, owner);
@@ -134,11 +151,31 @@ async function scanBalances(
         source: "list",
       };
       return asset;
-    } catch {
+    } catch (error) {
+      // Contract-level failures (not an ERC-20, reverted call) are skipped
+      // quietly; node/network failures are counted and surfaced.
+      if (isRpcTransportError(error)) {
+        rpcFailures++;
+        firstRpcError ??= error;
+      }
       return null;
     }
   });
-  return results.filter((r): r is Erc20Asset => r !== null);
+  const assets = results.filter((r): r is Erc20Asset => r !== null);
+  if (candidates.length > 0 && rpcFailures === candidates.length) {
+    throw new Error(describeRpcError(firstRpcError));
+  }
+  return { assets, rpcFailures, firstRpcError };
+}
+
+function rpcFailureNotice(scan: BalanceScan): string | undefined {
+  if (!scan.rpcFailures) return undefined;
+  return `${scan.rpcFailures} token balance(s) couldn't be read — ${describeRpcError(scan.firstRpcError)}`;
+}
+
+function joinNotices(...parts: (string | undefined)[]): string | undefined {
+  const text = parts.filter(Boolean).join(" ");
+  return text || undefined;
 }
 
 /**
@@ -149,27 +186,35 @@ async function scanBalances(
 export async function scanErc20(provider: RpcProvider, owner: string): Promise<Erc20ScanResult> {
   const cfg = getIndexerConfig();
   if (cfg.proxyUrl) {
+    let viaProxy: BalanceScan | undefined;
+    let proxyError: any;
     try {
-      const assets = await scanErc20ViaProxy(provider, owner, cfg.proxyUrl);
-      return { assets };
+      viaProxy = await scanErc20ViaProxy(provider, owner, cfg.proxyUrl);
     } catch (e: any) {
-      const fallback = await scanErc20ViaRpc(provider, owner);
-      return {
-        assets: fallback,
-        notice: `Token-discovery proxy failed (${e?.message ?? "error"}). Showed the built-in token list instead — add anything missing manually.`,
-      };
+      proxyError = e;
     }
+    if (viaProxy) return { assets: viaProxy.assets, notice: rpcFailureNotice(viaProxy) };
+    const fallback = await scanErc20ViaRpc(provider, owner);
+    return {
+      assets: fallback.assets,
+      notice: joinNotices(
+        `Token-discovery proxy failed (${proxyError?.message ?? "error"}). Showed the built-in token list instead — add anything missing manually.`,
+        rpcFailureNotice(fallback)
+      ),
+    };
   }
-  const assets = await scanErc20ViaRpc(provider, owner);
+  const scan = await scanErc20ViaRpc(provider, owner);
   return {
-    assets,
-    notice:
+    assets: scan.assets,
+    notice: joinNotices(
       "No token-discovery proxy configured — checked the built-in token list only. Deploy the Cloudflare worker and set its URL in Settings to auto-detect every token, or add tokens manually.",
+      rpcFailureNotice(scan)
+    ),
   };
 }
 
 /** Curated-list + RPC balance scan (keyless fallback). */
-async function scanErc20ViaRpc(provider: RpcProvider, owner: string): Promise<Erc20Asset[]> {
+async function scanErc20ViaRpc(provider: RpcProvider, owner: string): Promise<BalanceScan> {
   return scanBalances(
     provider,
     owner,
@@ -186,7 +231,7 @@ async function scanErc20ViaProxy(
   provider: RpcProvider,
   owner: string,
   proxyUrl: string
-): Promise<Erc20Asset[]> {
+): Promise<BalanceScan> {
   const base = proxyUrl.replace(/\/+$/, "");
   const r = await fetch(`${base}/token-holdings?address=${owner}`, {
     headers: { accept: "application/json" },
