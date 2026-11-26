@@ -1,12 +1,59 @@
 import { RpcProvider } from "starknet";
-import { DEFAULT_RPC_URL, LS } from "../config";
+import { DEFAULT_RPC_URL, LEGACY_DEFAULT_RPC_URLS, LS } from "../config";
 
-export function getRpcUrl(): string {
-  return localStorage.getItem(LS.rpcUrl) || DEFAULT_RPC_URL;
+function normalizeUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
 }
 
-export function setRpcUrl(url: string) {
-  localStorage.setItem(LS.rpcUrl, url.trim());
+/**
+ * The RPC URL in use: the user's saved override, or DEFAULT_RPC_URL. A saved
+ * value that is a former default is treated as unset (and cleared), so users
+ * who once pressed Save follow default changes instead of being pinned to a
+ * retired endpoint.
+ */
+// Override kept for this page session when browser storage can't persist it.
+let sessionOverride: string | undefined;
+
+export function getRpcUrl(): string {
+  if (sessionOverride !== undefined) return sessionOverride || DEFAULT_RPC_URL;
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(LS.rpcUrl);
+  } catch {
+    /* storage unavailable — use the default */
+  }
+  if (!saved) return DEFAULT_RPC_URL;
+  if (LEGACY_DEFAULT_RPC_URLS.some((u) => normalizeUrl(u) === normalizeUrl(saved))) {
+    try {
+      localStorage.removeItem(LS.rpcUrl);
+    } catch {
+      /* ignore */
+    }
+    return DEFAULT_RPC_URL;
+  }
+  return saved;
+}
+
+/**
+ * Save an RPC override. Blank or the default clears it, so future default
+ * changes apply. Returns false when browser storage is unavailable; the value
+ * then still applies for this page session.
+ */
+export function setRpcUrl(url: string): boolean {
+  const value = url.trim();
+  const isDefault = !value || normalizeUrl(value) === normalizeUrl(DEFAULT_RPC_URL);
+  try {
+    if (isDefault) {
+      localStorage.removeItem(LS.rpcUrl);
+    } else {
+      localStorage.setItem(LS.rpcUrl, value);
+    }
+    sessionOverride = undefined;
+    return true;
+  } catch {
+    sessionOverride = isDefault ? "" : value;
+    return false;
+  }
 }
 
 /** A read-only provider used for balance reads, ownerOf checks, sig verification. */

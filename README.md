@@ -83,8 +83,10 @@ npm run preview  # serve the production build
 
 ## Configuration (in-app Settings ⚙)
 
-- **RPC URL** — defaults to a public, CORS-open mainnet endpoint. Override with
-  your own provider if you hit rate limits.
+- **RPC URL** — defaults to the Starknet Foundation's public mainnet node
+  (`https://mainnet.nodes.starknet.org/rpc/v0_10`, CORS-enabled, rate-limited per
+  IP). Override with your own provider if you hit rate limits; clear the field to
+  go back to the default.
 - **Token-discovery proxy URL** — the deployed Cloudflare Worker (`/worker`).
   Holds the Starkscan key server-side; the browser never sees it. Blank → the
   built-in token list is used instead.

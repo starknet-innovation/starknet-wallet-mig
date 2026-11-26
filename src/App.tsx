@@ -254,6 +254,8 @@ export default function App() {
   const hasSelectedNfts = nfts.some((asset) => selected[asset.id]);
   const nftTransferCheckPending = nfts.length > 0 && nftTransferCheck.status !== "complete";
   const nftTransfersChecking = nftTransferCheck.status === "checking";
+  // Only selected NFTs wait on the transfer check; ERC-20s can always proceed.
+  const reviewBlockedByNftCheck = hasSelectedNfts && nftTransferCheckPending;
   const chainOk = sender ? isOnTargetChain(sender.chainId) : true;
   const sortedErc20s = useMemo(
     () =>
@@ -521,7 +523,8 @@ export default function App() {
     if (!sender || !recipient) return;
     setDeployFund({ status: "funding" });
     try {
-      // Make sure the wallet's active account is the sender before paying.
+      // Make sure the wallet's active account is the sender before paying. Keep
+      // the picker: the receiver may have been connected last from another wallet.
       const w = await connectWallet("alwaysAsk");
       if (!w) {
         setDeployFund({ status: "idle" });
@@ -1136,7 +1139,7 @@ export default function App() {
         {step === 2 && (
           <Section
             title="3 · Choose what to migrate"
-            sub="Detected ERC-20 balances and NFTs. NFT transfers are simulated against the receiving wallet before they can be selected."
+            sub="Detected ERC-20 balances and NFTs. Each NFT transfer to the receiving address is dry-run as a fee estimate from the sending wallet before it can be selected."
           >
             <div className="nav-inline">
               <button className="btn ghost" onClick={handleScan} disabled={scanning}>
@@ -1247,7 +1250,7 @@ export default function App() {
                     <button
                       className="btn ghost"
                       onClick={() => setAssetsSelected(nfts, false)}
-                      disabled={scanning || nftTransferCheckPending || !hasSelectedNfts}
+                      disabled={scanning || !hasSelectedNfts}
                     >
                       Deselect all
                     </button>
@@ -1314,7 +1317,10 @@ export default function App() {
                               setAssetsSelected(collection.assets, !collectionSelected)
                             }
                             disabled={
-                              scanning || nftTransferCheckPending || selectableAssets.length === 0
+                              scanning ||
+                              // Deselecting is always allowed; selecting waits for the check.
+                              (!collectionSelected &&
+                                (nftTransferCheckPending || selectableAssets.length === 0))
                             }
                           >
                             {collectionSelected ? "Deselect collection" : "Select collection"}
@@ -1328,7 +1334,11 @@ export default function App() {
                                   type="checkbox"
                                   checked={!!selected[a.id]}
                                   onChange={() => toggle(a.id)}
-                                  disabled={!!migrationBlockers[a.id] || nftTransferCheckPending}
+                                  disabled={
+                                    !!migrationBlockers[a.id] ||
+                                    // Until the check passes, NFTs can be deselected but not selected.
+                                    (nftTransferCheckPending && !selected[a.id])
+                                  }
                                 />
                                 <span>{migrationBlockers[a.id] ? "Unavailable" : "Include"}</span>
                               </label>
@@ -1468,15 +1478,17 @@ export default function App() {
               </button>
               <button
                 className="btn primary"
-                disabled={selectedItems.length === 0 || nftTransferCheckPending}
+                disabled={selectedItems.length === 0 || reviewBlockedByNftCheck}
                 onClick={() => {
                   setMStatus("idle");
                   setFeeText(undefined);
                   setStep(3);
                 }}
               >
-                {nftTransferCheckPending
-                  ? "Checking NFT transferability…"
+                {reviewBlockedByNftCheck
+                  ? nftTransfersChecking
+                    ? "Checking NFT transferability…"
+                    : "Retry the NFT check or deselect NFTs"
                   : `Review ${selectedItems.length} transfer(s) →`}
               </button>
             </div>

@@ -9,9 +9,11 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [proxy, setProxy] = useState(idx.proxyUrl);
   const [nftUrl, setNftUrl] = useState(idx.nftUrlTemplate);
   const [saved, setSaved] = useState(false);
+  const [rpcNotPersisted, setRpcNotPersisted] = useState(false);
 
   function save() {
-    setRpcUrl(rpc || DEFAULT_RPC_URL);
+    const persisted = setRpcUrl(rpc || DEFAULT_RPC_URL);
+    setRpcNotPersisted(!persisted);
     setIndexerConfig({ proxyUrl: proxy, nftUrlTemplate: nftUrl });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
@@ -34,6 +36,11 @@ export function Settings({ onClose }: { onClose: () => void }) {
             Public mainnet RPC (default: Starknet Foundation node, spec v0_10). Used for balance
             reads &amp; signature checks.
           </small>
+          {rpcNotPersisted && (
+            <small className="warn-text">
+              Browser storage is unavailable, so this RPC applies until you reload the page.
+            </small>
+          )}
         </label>
 
         <hr />

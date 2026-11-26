@@ -13,12 +13,12 @@ export const CHAIN_LABEL = "Starknet Mainnet";
  */
 export const DEFAULT_RPC_URL = "https://mainnet.nodes.starknet.org/rpc/v0_10";
 
-export const RPC_ALTERNATIVES = [
-  "https://mainnet.nodes.starknet.org/rpc/v0_10",
-  "https://api.cartridge.gg/x/starknet/mainnet",
-  "https://free-rpc.nethermind.io/mainnet-juno/v0_8",
-  "https://starknet-mainnet.public.blastapi.io/rpc/v0_8",
-];
+/**
+ * Former default RPC URLs. A saved RPC equal to one of these was never a real
+ * user choice (Settings used to store the default on Save), so it is dropped in
+ * favour of DEFAULT_RPC_URL. Cartridge now requires an API key.
+ */
+export const LEGACY_DEFAULT_RPC_URLS = ["https://api.cartridge.gg/x/starknet/mainnet"];
 
 /**
  * Token-discovery proxy (Cloudflare Worker — see /worker). Starkscan's Agent API
