@@ -31,7 +31,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           <span>Starknet RPC URL</span>
           <input value={rpc} onChange={(e) => setRpc(e.target.value)} spellCheck={false} />
           <small>
-            Public, CORS-open mainnet RPC. Used for balance reads &amp; signature checks.
+            Public mainnet RPC (default: Starknet Foundation node, spec v0_10). Used for balance
+            reads &amp; signature checks.
           </small>
         </label>
 
